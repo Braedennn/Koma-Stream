@@ -19,3 +19,6 @@ desktop/dist/
 desktop/build/embedded/
 desktop/build/bundle/
 Servers - DONT TOUCH/anivault-scraper/dist/
+
+# internal handoff notes
+Servers - DONT TOUCH/TODO.md
