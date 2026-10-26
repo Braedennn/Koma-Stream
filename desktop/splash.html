@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Koma</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { -webkit-app-region: drag; display: grid; place-items: center; background: radial-gradient(900px 500px at 50% 35%, rgba(124, 92, 255, .14), transparent 60%), #08080D; color: #F4F5FA; font: 600 14px/1.5 "Segoe UI", system-ui, sans-serif; user-select: none; }
+  main { display: grid; justify-items: center; gap: 18px; text-align: center; padding: 24px; }
+  img { width: 96px; height: 96px; filter: drop-shadow(0 18px 36px rgba(124, 92, 255, .45)); animation: breathe 2.4s ease-in-out infinite; }
+  h1 { margin: 0; font-size: 28px; letter-spacing: -.02em; }
+  p { margin: 0; max-width: 46ch; color: #A9AEC2; min-height: 21px; }
+  .bar { width: 180px; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+  .bar i { display: block; width: 40%; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #7C5CFF, #B249F8, #FF4ECD); animation: slide 1.2s ease-in-out infinite; }
+  @keyframes breathe { 50% { transform: scale(1.04); } }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+  @media (prefers-reduced-motion: reduce) { img, .bar i { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+  <img src="build/png/256.png" alt="">
+  <h1>Koma</h1>
+  <div class="bar"><i></i></div>
+  <p id="status">Getting things ready…</p>
+</main>
+<script>
+  window.setStatus = text => { document.getElementById('status').textContent = text; };
+</script>
+</body>
+</html>

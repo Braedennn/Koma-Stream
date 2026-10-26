@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Koma</title>
+<meta name="description" content="Browse anime by season, weekly schedule and genre. Watch sub and dub episodes straight from the site.">
+<meta name="theme-color" content="#08080D">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://s4.anilist.co">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/koma.css">
+<script type="module" src="/js/main.js"></script>
+</head>
+<body>
+<a class="skip" href="#app">Skip to content</a>
+
+<header class="top" id="top">
+  <a class="logo" href="/" aria-label="Koma home">
+    <span class="logo-mark"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.8v14.4a1 1 0 0 0 1.5.86l11.5-7.2a1 1 0 0 0 0-1.72L8.5 3.94A1 1 0 0 0 7 4.8z" fill="currentColor"/></svg></span>
+    <span class="logo-word">koma</span>
+  </a>
+  <nav class="nav" aria-label="Main">
+    <a href="/">Home</a>
+    <a href="/browse">Browse</a>
+    <a href="/schedule">Schedule</a>
+    <a href="/browse?sort=TRENDING_DESC">Trending</a>
+    <a href="/list">Library <span class="count" data-count hidden></span></a>
+  </nav>
+  <form class="search" role="search" action="/browse" autocomplete="off">
+    <label class="search-field">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <span class="sr">Search anime</span>
+      <input id="q" name="search" type="search" placeholder="Search anime" role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list" enterkeyhint="search">
+      <kbd class="kbd" aria-hidden="true">Ctrl K</kbd>
+    </label>
+    <ul id="suggest" class="suggest" role="listbox" aria-label="Suggestions" hidden></ul>
+  </form>
+  <div class="acct" id="acct"></div>
+</header>
+
+<dialog class="modal" id="al-setup" aria-labelledby="al-setup-title">
+  <form method="dialog" class="modal-body">
+    <h2 id="al-setup-title">Connect your AniList account</h2>
+    <p>AniList needs a free “API client” on your account before Koma can sign in. You only do this once:</p>
+    <ol>
+      <li>Open <a href="https://anilist.co/settings/developer" target="_blank" rel="noopener">AniList developer settings</a> and click <b>Create New Client</b>.</li>
+      <li>Name it <b>Koma</b> and set the <b>Redirect URL</b> to:
+        <span class="copy-row"><code id="al-redirect"></code><button class="btn btn-ghost btn-sm" type="button" data-copy-redirect>Copy</button></span></li>
+      <li>Save, then paste the <b>Client ID</b> (a number) here:</li>
+    </ol>
+    <label class="field"><span class="sr">Client ID</span><input id="al-client" inputmode="numeric" autocomplete="off" placeholder="Client ID, e.g. 12345"></label>
+    <p class="modal-err" id="al-err" hidden></p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn btn-primary btn-sm" value="ok" id="al-continue">Continue to AniList</button>
+    </div>
+  </form>
+</dialog>
+
+<main id="app" tabindex="-1"></main>
+
+<footer class="foot">
+  <div>
+    <a class="logo" href="/" aria-label="Koma home"><span class="logo-mark"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.8v14.4a1 1 0 0 0 1.5.86l11.5-7.2a1 1 0 0 0 0-1.72L8.5 3.94A1 1 0 0 0 7 4.8z" fill="currentColor"/></svg></span><span>koma</span></a>
+    <p>Discover anime, follow the weekly schedule and watch every episode right here — subbed or dubbed.</p>
+  </div>
+  <div>
+    <h4>Explore</h4>
+    <nav aria-label="Explore"><a href="/browse?sort=TRENDING_DESC">Trending</a><a href="/browse?sort=SCORE_DESC">Top rated</a><a href="/browse?status=RELEASING">Airing now</a><a href="/schedule">Schedule</a></nav>
+  </div>
+  <div>
+    <h4>You</h4>
+    <nav aria-label="You"><a href="/list">My list</a><a href="/browse">Browse all</a><a href="https://anilist.co" target="_blank" rel="noopener">AniList</a></nav>
+  </div>
+  <p class="fine">Catalog data from AniList. Video from your local streaming servers. Your list and progress are saved in this browser.</p>
+</footer>
+
+<nav class="tabbar" aria-label="Main">
+  <a href="/"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5L12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/></svg>Home</a>
+  <a href="/browse"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></svg>Browse</a>
+  <a href="/schedule"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Schedule</a>
+  <a href="/list"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z"/></svg>Library<span class="count" data-count hidden></span></a>
+</nav>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<noscript><p class="wrap">Koma needs JavaScript to load anime listings.</p></noscript>
+</body>
+</html>

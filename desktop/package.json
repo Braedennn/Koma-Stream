@@ -1,0 +1,17 @@
+{
+  "name": "koma-desktop",
+  "productName": "Koma",
+  "version": "1.0.0",
+  "description": "Koma as a desktop app: starts the site and its streaming servers for you.",
+  "main": "main.js",
+  "private": true,
+  "author": "Noire",
+  "scripts": {
+    "start": "electron .",
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "44.7.0"
+  }
+}

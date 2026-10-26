@@ -1,0 +1,15 @@
+{
+  "name": "koma",
+  "version": "1.0.0",
+  "description": "Koma: browse anime by season, schedule and genre, track what you watch, and jump to official streams. Data from AniList.",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18.17"
+  }
+}
