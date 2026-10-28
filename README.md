@@ -26,14 +26,14 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 
 **The app**
 - Everything runs locally and is bundled inside the app — no Node, no Python, no npm needed on your machine
-- **Discord Rich Presence** — the show and episode you're watching live on your Discord profile, with your current page when you're browsing (one-time setup in App settings)
+- **Discord Rich Presence** — what you're watching shows on your own Discord profile out of the box: the show's cover art, a play/pause badge, a live timing bar, and a button to the Koma download site; your current page shows while you're browsing
 - All servers bind to 127.0.0.1 only — nothing is exposed to your network, no firewall prompts
 - Close the app and the servers it started stop with it
 - Logs, if you ever need them, live in `%APPDATA%\Koma\logs`
 
 ## Install
 
-1. Download **`Koma-Setup.exe`** from the [latest release](../../releases/latest)
+1. Download **`Koma-Setup.exe`** — from the release assets below or [totallynoire.xyz/koma](https://www.totallynoire.xyz/koma)
 2. Run it — per-user install, no admin prompt, desktop + Start menu shortcuts, clean uninstaller
 3. Koma opens, boots its servers in the background, and drops you into the site
 
