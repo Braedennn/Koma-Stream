@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
 const { DiscordRpc, buildActivity } = require('./discord-rpc');
-const { newerVersion, apply: applyAsset } = require('./updater');
+const { newerVersion, sweep, download, install } = require('./updater');
 
 const PORT = 4000;
 // localhost (not 127.0.0.1): it's the address the AniList sign-in sends you back to, and it keeps
@@ -278,58 +278,157 @@ ipcMain.on('koma:presence:clear', () => { presence.activity = null; presence.cli
 /* ---------- update checks (GitHub releases) ---------- */
 const UPDATE_REPO = 'Braedennn/Koma-Stream';
 const UPDATES = path.join(app.getPath('userData'), 'update');
-let updateShown = false;
+const SETUP = path.join(UPDATES, 'Koma-Setup.exe');
+const SETUP_META = path.join(UPDATES, 'meta.json');
+let updateShown = false; // this session has already surfaced this release
+let update = null;       // what the card offers: { version, htmlUrl, downloadUrl, notes, ready }
 
-/** A small in-app card — never a native dialog. It never asks for a click to apply:
- *  updates download and open the installer on their own; the card just says so and
- *  breaks the only way out of a blocked download (a manual link) if that happens. */
-function injectUpdateCard(remote, releaseUrl, downloadUrl, failure) {
+const updateLog = msg => { try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] ${msg}\n`); } catch { /* best-effort */ } };
+
+// The card and notes-modal styles, kept here so the injected script stays readable.
+const CARD_CSS = '#koma-update{position:fixed;right:22px;bottom:22px;z-index:95;display:flex;gap:13px;align-items:center;padding:16px 18px;border-radius:14px;'
+  + 'background:rgba(13,14,22,.86);border:1px solid rgba(255,255,255,.12);box-shadow:0 24px 60px -16px rgba(0,0,0,.9);'
+  + '-webkit-backdrop-filter:blur(22px) saturate(1.5);backdrop-filter:blur(22px) saturate(1.5);font:600 14px/1.5 Inter,system-ui,sans-serif;color:#F4F5FA;'
+  + 'max-width:360px;opacity:0;transform:translateY(16px);transition:opacity .3s,transform .35s cubic-bezier(.34,1.4,.5,1)}'
+  + '#koma-update.in{opacity:1;transform:none}'
+  + '#koma-update [hidden]{display:none!important}'
+  + '#koma-update .ku-logo{flex:none;width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#7C5CFF,#B249F8 55%,#FF4ECD);display:grid;place-items:center;box-shadow:0 6px 18px -6px rgba(124,92,255,.5)}'
+  + '#koma-update .ku-logo svg{width:15px;height:15px;margin-left:1px}'
+  + '#koma-update b{display:block;font-size:14.5px;font-weight:800}'
+  + '#koma-update span{display:block;color:#A9AEC2;font-size:12.5px}'
+  + '#koma-update .ku-actions{display:flex;align-items:center;gap:9px;margin-top:9px}'
+  + '#koma-update .ku-now{display:inline-flex;align-items:center;height:30px;padding:0 14px;border-radius:999px;border:0;cursor:pointer;'
+  + 'background:linear-gradient(135deg,#7C5CFF,#B249F8 55%,#FF4ECD);color:#fff;font:700 12.5px Inter,system-ui,sans-serif;box-shadow:0 6px 16px -8px rgba(124,92,255,.55)}'
+  + '#koma-update .ku-now:hover{filter:brightness(1.1)}'
+  + '#koma-update .ku-now:disabled{opacity:.6;cursor:default;filter:none}'
+  + '#koma-update a.ku-go{display:inline-flex;align-items:center;height:30px;padding:0 14px;border-radius:999px;text-decoration:none;'
+  + 'background:linear-gradient(135deg,#7C5CFF,#B249F8 55%,#FF4ECD);color:#fff;font-size:12.5px;font-weight:700;box-shadow:0 6px 16px -8px rgba(124,92,255,.55)}'
+  + '#koma-update a.ku-go:hover{filter:brightness(1.1)}'
+  + '#koma-update a.ku-notes{color:#A78BFF;font-size:12.5px;font-weight:700;text-decoration:none;cursor:pointer}'
+  + '#koma-update a.ku-notes:hover{color:#fff}'
+  + '#koma-update .ku-later{margin-left:auto;border:0;background:none;color:#6E7488;font:700 12.5px Inter,system-ui,sans-serif;cursor:pointer;padding:6px 8px;border-radius:8px}'
+  + '#koma-update .ku-later:hover{color:#fff;background:rgba(255,255,255,.08)}'
+  + '#koma-notes{position:fixed;inset:0;z-index:200;display:grid;place-items:center;font:600 14px/1.6 Inter,system-ui,sans-serif;color:#F4F5FA;opacity:0;transition:opacity .25s}'
+  + '#koma-notes.in{opacity:1}'
+  + '#koma-notes .kn-scrim{position:absolute;inset:0;background:rgba(4,4,8,.72);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}'
+  + '#koma-notes .kn-panel{position:relative;width:min(560px,calc(100vw - 48px));max-height:min(78vh,720px);display:flex;flex-direction:column;'
+  + 'background:#10111B;border:1px solid rgba(255,255,255,.12);border-radius:20px;box-shadow:0 32px 80px -20px rgba(0,0,0,.95);overflow:hidden;'
+  + 'transform:translateY(14px) scale(.985);transition:transform .3s cubic-bezier(.34,1.4,.5,1)}'
+  + '#koma-notes.in .kn-panel{transform:none}'
+  + '#koma-notes header{display:flex;align-items:center;gap:10px;padding:15px 20px;border-bottom:1px solid rgba(255,255,255,.08)}'
+  + '#koma-notes header b{font-family:Sora,Inter,system-ui,sans-serif;font-size:16px;font-weight:800;flex:1}'
+  + '#koma-notes header button{border:0;background:none;color:#6E7488;font-size:22px;line-height:1;cursor:pointer;padding:2px 8px;border-radius:8px}'
+  + '#koma-notes header button:hover{color:#fff;background:rgba(255,255,255,.08)}'
+  + '#koma-notes .kn-body{padding:8px 20px 18px;overflow-y:auto;font-size:13.5px;color:#C9CDDC}'
+  + '#koma-notes .kn-body p{margin:10px 0}'
+  + '#koma-notes .kn-body b{color:#F4F5FA}'
+  + '#koma-notes .kn-body i{color:#A9AEC2}'
+  + '#koma-notes .kn-body h4{margin:16px 0 2px;font-size:11.5px;font-weight:800;letter-spacing:.07em;color:#A78BFF;text-transform:uppercase}'
+  + '#koma-notes .kn-body ul{margin:10px 0;padding-left:18px}'
+  + '#koma-notes .kn-body li{margin:5px 0}'
+  + '#koma-notes .kn-body li::marker{color:#A78BFF}'
+  + '#koma-notes .kn-body code{background:rgba(124,92,255,.14);border:1px solid rgba(124,92,255,.25);border-radius:5px;padding:1px 5px;font:600 12px Consolas,monospace;color:#CDBEFF}'
+  + '#koma-notes .kn-body a{color:#A78BFF}';
+
+/** A release body (GitHub-flavored markdown) rendered to HTML. Everything is escaped
+ *  first, so a release body can't inject markup; then a small, safe subset — headings,
+ *  bullets, bold, italics, code, https links — becomes tags. */
+function notesHTML(body, version) {
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const inline = s => s
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/\*([^*]+)\*/g, '<i>$1</i>')
+    .replace(/\[([^\]]+)\]\((https:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+  const lines = String(body || '').replace(/\r\n?/g, '\n').split('\n').map(l => l.trim());
+  while (lines.length && !lines[0]) lines.shift();
+  if (lines[0] && lines[0].includes(version) && /^Koma/i.test(lines[0])) lines.shift(); // the modal title already says it
+  let html = '', list = '';
+  const flush = () => { if (list) { html += `<ul>${list}</ul>`; list = ''; } };
+  for (const line of lines) {
+    if (/^[-*]\s+/.test(line)) { list += `<li>${inline(esc(line.replace(/^[-*]\s+/, '')))}</li>`; continue; }
+    flush();
+    if (!line) continue;
+    const h = line.match(/^#{1,4}\s+(.*)/);
+    if (h) html += `<h4>${inline(esc(h[1]))}</h4>`;
+    else html += `<p>${inline(esc(line))}</p>`;
+  }
+  flush();
+  return html;
+}
+
+/** The in-app update card. Injected once, then driven through its states from here:
+ *  downloading → ready, where "Update now" is the only thing that can run the
+ *  installer, or → failed, with a manual download as the way out. "Later" dismisses
+ *  the card; the cached installer is offered again next launch (see the meta check).
+ *  "What's new" opens the release notes in-app — no browser redirect. */
+function injectUpdateCard(state) {
   if (!win || win.isDestroyed()) return;
   const url = win.webContents.getURL();
   if (!url.startsWith(URL_HOME) && !url.startsWith(PROBE)) return; // only on the app's own pages
-  const ver = JSON.stringify(remote), cur = JSON.stringify(app.getVersion());
-  const rn = JSON.stringify(releaseUrl), dl = JSON.stringify(downloadUrl || releaseUrl), fail = JSON.stringify(failure || '');
+  const ver = JSON.stringify(update.version), cur = JSON.stringify(app.getVersion());
+  const dl = JSON.stringify(update.downloadUrl || update.htmlUrl || `https://github.com/${UPDATE_REPO}/releases/latest`);
+  const notes = JSON.stringify(update.notes || '');
   win.webContents.executeJavaScript(`(() => {
     if (document.getElementById('koma-update')) return;
     const css = document.createElement('style');
-    css.textContent = '#koma-update{position:fixed;right:22px;bottom:22px;z-index:95;display:flex;gap:13px;align-items:center;padding:16px 18px;border-radius:14px;'
-      + 'background:rgba(13,14,22,.86);border:1px solid rgba(255,255,255,.12);box-shadow:0 24px 60px -16px rgba(0,0,0,.9);'
-      + '-webkit-backdrop-filter:blur(22px) saturate(1.5);backdrop-filter:blur(22px) saturate(1.5);font:600 14px/1.5 Inter,system-ui,sans-serif;color:#F4F5FA;'
-      + 'max-width:340px;opacity:0;transform:translateY(16px);transition:opacity .3s,transform .35s cubic-bezier(.34,1.4,.5,1)}'
-      + '#koma-update.in{opacity:1;transform:none}'
-      + '#koma-update .ku-logo{flex:none;width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#7C5CFF,#B249F8 55%,#FF4ECD);display:grid;place-items:center;box-shadow:0 6px 18px -6px rgba(124,92,255,.5)}'
-      + '#koma-update .ku-logo svg{width:15px;height:15px;margin-left:1px}'
-      + '#koma-update b{display:block;font-size:14.5px;font-weight:800}'
-      + '#koma-update span{display:block;color:#A9AEC2;font-size:12.5px}'
-      + '#koma-update .ku-actions{display:flex;gap:7px;margin-top:9px}'
-      + '#koma-update a.ku-go{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 14px;border-radius:999px;text-decoration:none;'
-      + 'background:linear-gradient(135deg,#7C5CFF,#B249F8 55%,#FF4ECD);color:#fff;font-size:12.5px;font-weight:700;box-shadow:0 6px 16px -8px rgba(124,92,255,.55)}'
-      + '#koma-update a.ku-go:hover{filter:brightness(1.1)}'
-      + '#koma-update a.ku-notes{color:#A78BFF;font-size:12.5px;font-weight:700;text-decoration:none;align-self:center}'
-      + '#koma-update a.ku-notes:hover{color:#fff}'
-      + '#koma-update button{margin-left:auto;border:0;background:none;color:#6E7488;font-size:12.5px;font-weight:700;cursor:pointer;align-self:center;padding:6px 8px;border-radius:8px}'
-      + '#koma-update button:hover{color:#fff;background:rgba(255,255,255,.08)}';
+    css.textContent = ${JSON.stringify(CARD_CSS)};
     document.head.appendChild(css);
     const card = document.createElement('div');
-    card.id = 'koma-update';${'' /* auto mode: say what's happening and help exactly when the auto path failed */}
-    card.innerHTML = ${'' }
+    card.id = 'koma-update';
+    card.innerHTML =
       '<div class="ku-logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg></div>'
-      + '<div><b>' + 'Koma ' + ${ver} + ' is out' + '</b>'
-      + '<span class="ku-status">' + (${fail} ? 'Couldn\\''t update automatically: ' + ${fail} : ${'You'} + ' have Koma ' + ${cur} + ' — updating automatically, nothing to click.') + '</span>'
+      + '<div><b>Koma ' + ${ver} + ' is out</b><span class="ku-status"></span>'
       + '<div class="ku-actions">'
-      + (${fail} ? '<a class="ku-go" href=' + ${dl} + '>Download the installer</a>' : '')
-      + '<a class="ku-notes" href=' + ${rn} + '>What changed</a>'
-      + '<button type="button">Later</button></div></div>';
+      + '<button type="button" class="ku-now" hidden>Update now</button>'
+      + '<a class="ku-go" href=' + ${dl} + ' hidden>Download the installer</a>'
+      + (${notes} ? '<a class="ku-notes" href="#">What\\'s new</a>' : '')
+      + '<button type="button" class="ku-later">Later</button></div></div>';
     document.body.appendChild(card);
     requestAnimationFrame(() => card.classList.add('in'));
-    card.querySelector('button').addEventListener('click', () => { card.classList.remove('in'); setTimeout(() => card.remove(), 400); });
-    window.__kuProgress = pct => {
-      const s = document.querySelector('#koma-update .ku-status');
-      if (s) s.textContent = 'Updating automatically — downloading ' + pct + '%…';
-    };
+    const say = txt => { const s = card.querySelector('.ku-status'); if (s) s.textContent = txt; };
+    const st = ${JSON.stringify(state)};
+    if (st === 'ready') { say('Koma ' + ${ver} + ' is ready to install. Run it now?'); card.querySelector('.ku-now').hidden = false; }
+    else if (st === 'failed') { say('Couldn\\'t download the update — grab it manually below.'); card.querySelector('.ku-go').hidden = false; }
+    else say('You have Koma ' + ${cur} + ' — getting the update…');
+    card.querySelector('.ku-later').addEventListener('click', () => {
+      card.classList.remove('in');
+      setTimeout(() => card.remove(), 400);
+    });
+    card.querySelector('.ku-now').addEventListener('click', async e => {
+      const b = e.currentTarget;
+      if (b.disabled) return;
+      b.disabled = true;
+      say('Opening the installer…');
+      try {
+        const r = await window.koma.update.apply();
+        if (!r || !r.ok) throw new Error('not applied');
+      } catch {
+        say('Couldn\\'t start the installer — grab it manually below.');
+        card.querySelector('.ku-go').hidden = false;
+        b.disabled = false;
+      }
+    });
+    const notesBtn = card.querySelector('.ku-notes');
+    if (notesBtn) notesBtn.addEventListener('click', e => {
+      e.preventDefault();
+      if (document.getElementById('koma-notes')) return;
+      const ov = document.createElement('div');
+      ov.id = 'koma-notes';
+      ov.innerHTML = '<div class="kn-scrim"></div><div class="kn-panel"><header><b>What\\'s new in Koma ' + ${ver} + '</b><button type="button" aria-label="Close">×</button></header><div class="kn-body">' + ${notes} + '</div></div>';
+      document.body.appendChild(ov);
+      requestAnimationFrame(() => ov.classList.add('in'));
+      const close = () => { ov.classList.remove('in'); setTimeout(() => ov.remove(), 250); };
+      ov.querySelector('header button').addEventListener('click', close);
+      ov.querySelector('.kn-scrim').addEventListener('click', close);
+      document.addEventListener('keydown', function onkey(ev) { if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', onkey); } });
+    });
+    window.__kuProgress = pct => say('Getting the update — ' + pct + '%…');
+    window.__kuReady = () => { say('Koma ' + ${ver} + ' is ready to install. Run it now?'); card.querySelector('.ku-now').hidden = false; };
+    window.__kuFailed = () => { say('Couldn\\'t download the update — grab it manually below.'); card.querySelector('.ku-go').hidden = false; };
     return 'rendered';
-  })()`).then(() => { try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] update card rendered (auto)\n`); } catch { /* best-effort */ } })
-    .catch(err => { try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] update card failed: ${err.message}\n`); } catch { /* best-effort */ } });
+  })()`).then(() => updateLog('update card rendered'))
+    .catch(err => updateLog(`update card failed: ${err.message}`));
 }
 
 function cardProgress(pct) {
@@ -344,33 +443,57 @@ async function checkForUpdates() {
       headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Koma-Desktop' },
       signal: AbortSignal.timeout(10000),
     });
-    if (!r.ok) { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] check failed: HTTP ${r.status}\n`); return; }
+    if (!r.ok) { updateLog(`check failed: HTTP ${r.status}`); return; }
     const rel = await r.json();
     const remote = String(rel.tag_name || '').replace(/^v/, '');
     const asset = (rel.assets || []).find(x => x.name === 'Koma-Setup.exe');
-    if (remote && asset && newerVersion(remote, app.getVersion())) {
-      updateShown = true;
-      fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] auto-update: v${remote} (running v${app.getVersion()})\n`);
-      injectUpdateCard(remote, rel.html_url);
-      applyAsset({
-        url: asset.browser_download_url,
-        dir: UPDATES,
-        log: msg => { try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] ${msg}\n`); } catch { /* best-effort */ } },
-        onPct: cardProgress,
-        quitAfter: () => app.quit(), // the installer takes over; its NSIS script restarts Koma on finish
-      }).then(exe => {
-        try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] installer opened at ${exe}\n`); } catch { /* best-effort */ }
-      }).catch(err => {
-        fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] auto-update error: ${err.message}\n`);
-        injectUpdateCard(remote, rel.html_url, asset.browser_download_url, err.message); // the manual way, only when automation failed
-      });
-    } else {
-      fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] up to date (v${app.getVersion()})\n`);
-    }
+    if (!(remote && asset && newerVersion(remote, app.getVersion()))) { updateLog(`up to date (v${app.getVersion()})`); return; }
+    updateShown = true;
+    update = { version: remote, htmlUrl: rel.html_url, downloadUrl: asset.browser_download_url, notes: notesHTML(rel.body, remote) };
+    updateLog(`update available: v${remote} (running v${app.getVersion()})`);
+
+    // An installer already fetched for exactly this release — a "Later" from a previous
+    // session — goes straight to the ask instead of downloading again.
+    try {
+      const meta = JSON.parse(fs.readFileSync(SETUP_META, 'utf8'));
+      if (meta.version === remote && fs.statSync(SETUP).size === meta.size) {
+        update.ready = true;
+        updateLog('cached installer matches the release — asking, not downloading');
+        injectUpdateCard('ready');
+        return;
+      }
+    } catch { /* no usable cache: download fresh */ }
+
+    sweep(UPDATES); // stale installers and partials; only runs when about to replace them
+    try { fs.unlinkSync(SETUP_META); } catch { /* fine */ }
+    injectUpdateCard('downloading');
+    const exe = await download(asset.browser_download_url, { dir: UPDATES, log: updateLog, onPct: cardProgress });
+    fs.writeFileSync(SETUP_META, JSON.stringify({ version: remote, size: fs.statSync(exe).size }));
+    update.ready = true;
+    updateLog(`downloaded ${exe}`);
+    if (win && !win.isDestroyed()) win.webContents.executeJavaScript('window.__kuReady && window.__kuReady()').catch(() => {});
   } catch (err) {
-    try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] check error: ${err.message}\n`); } catch { /* logs are best-effort */ }
+    updateLog(`update error: ${err.message}`);
+    if (update && !update.ready && win && !win.isDestroyed()) {
+      win.webContents.executeJavaScript('window.__kuFailed && window.__kuFailed()').catch(() => {});
+    }
   }
 }
+
+/** The one destructive step — running the installer — happens only here, and only
+ *  because the user clicked "Update now" in the card. The installer's own NSIS script
+ *  stops Koma and restarts the upgraded build. */
+ipcMain.handle('koma:update:apply', () => {
+  try { fs.statSync(SETUP); } catch { return { ok: false }; }
+  updateLog('consent given — opening the installer');
+  try {
+    install(SETUP, { log: updateLog, quitAfter: () => app.quit() });
+    return { ok: true };
+  } catch (err) {
+    updateLog(`could not open the installer: ${err.message}`);
+    return { ok: false };
+  }
+});
 
 /* ---------- app lifecycle ---------- */
 if (!app.requestSingleInstanceLock()) app.quit();

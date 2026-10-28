@@ -11,4 +11,9 @@ contextBridge.exposeInMainWorld('koma', {
     clear: () => ipcRenderer.send('koma:presence:clear'),
     onStatus: cb => ipcRenderer.on('koma:presence:status', (_e, state) => cb(state)),
   },
+  // Self-update. Running the installer closes the app, so the only exposed verb is
+  // the explicit "Update now" click — nothing here fires on its own.
+  update: {
+    apply: () => ipcRenderer.invoke('koma:update:apply'),
+  },
 });

@@ -1,7 +1,7 @@
-// Automatic self-updating for packaged builds: when a newer GitHub release is found,
-// download its installer, open it for the user, and clean up the download dir — no
-// clicking required. Knows nothing about Electron: test and caller feed the paths and
-// hooks in, so the whole flow can be driven end to end in a test.
+// Self-updating for packaged builds: sweep old installers, stream a new release's
+// installer down in the background, and then ASK — the installer only ever runs when
+// the user clicks "Update now" in the app. Knows nothing about Electron: test and
+// caller feed the paths and hooks in, so the whole flow can be driven in a test.
 const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
@@ -78,24 +78,15 @@ async function download(url, { dir, log, onPct = () => {} }) {
 
 const dropAll = p => { try { fs.unlinkSync(p); } catch { /* fine */ } };
 
-/** The full flow: sweep old files, stream the new installer down, and open it (its own
- *  NSIS script stops this app and restarts the upgraded one). `spawnImpl` exists so the
- *  test never really executes the installer; `quitAfter` lets the caller close the app
- *  once the installer has control. */
-async function apply({ url, dir, log, onPct, quitAfter, spawnImpl }) {
-  sweep(dir);
-  let exe;
-  try {
-    exe = await download(url, { dir, log, onPct });
-  } catch (err) {
-    log(`auto-download failed: ${err.message}`);
-    throw err;
-  }
+/** Hand over: open the installer and quit this app a moment later — the NSIS script
+ *  stops Koma itself and restarts the upgraded build. Deliberately dumb and separate
+ *  from download: nothing here runs until the user's explicit "Update now" click. */
+function install(exePath, { quitAfter, spawnImpl, log = () => {} }) {
   log('opening the installer…');
   const sp = spawnImpl || ((cmd, args, opts) => cp.spawn(cmd, args, opts));
-  sp(exe, [], { detached: true, stdio: 'ignore' }).unref();
+  sp(exePath, [], { detached: true, stdio: 'ignore' }).unref();
   if (quitAfter) setTimeout(quitAfter, 2500); // give the installer a moment, then leave the stage
-  return exe;
+  return exePath;
 }
 
-module.exports = { newerVersion, sweep, download, apply };
+module.exports = { newerVersion, sweep, download, install };
