@@ -19,6 +19,7 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 - Personal list, watch progress, resume points, "continue watching" — saved locally, auto-synced with your AniList account if you sign in (flaky connections can't lose an episode mark: failed writes retry from an outbox)
 - Sub/dub episode counts on every poster, so you know before you click
 - **Desktop notifications** when a show in your list drops a new episode — a Windows toast that opens straight into it
+- **Stats page with streaks & badges** — a `/stats` view built on a private, honest journal of the episodes you actually finish: episodes + watch time, a 12-week GitHub-style activity log, your genre spread, watching streaks, and 13 badges that unlock the moment their number is crossed
 
 **The player**
 - Custom-built on hls.js — plays **Japanese sub and English dub** where available, with a one-click toggle that remembers your preference
