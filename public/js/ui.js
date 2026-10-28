@@ -127,7 +127,7 @@ export const skRow = () => `<section class="row" aria-hidden="true"><div class="
 /* ---------- rows ---------- */
 export const row = ({ title, sub = '', link = '', linkLabel = 'View all', body, wide = false, id = '' }) => `
   <section class="row"${id ? ` id="${id}"` : ''}>
-    <div class="row-head"><div><h2>${title}</h2>${sub ? `<p>${sub}</p>` : ''}</div>${link ? `<a class="link-btn" href="${link}">${linkLabel}${icon('right')}</a>` : ''}</div>
+    <div class="row-head"><h2 class="section-title">${title}${sub ? `<span>${esc(sub)}</span>` : ''}</h2>${link ? `<a class="link-btn" href="${link}">${linkLabel}${icon('right')}</a>` : ''}</div>
     <div class="rail${wide ? ' wide' : ''}">
       <button class="rail-btn prev" type="button" aria-label="Scroll left" disabled><span>${icon('left')}</span></button>
       <div class="track">${body}</div>

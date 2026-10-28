@@ -43,6 +43,8 @@ let pollDelay = 4000;
 let painting = false;
 
 export function audioBadgeHTML({ sub, dub }) {
+  if (sub && sub === dub) // sub and dub in equal supply: one chip says it once
+    return `<span class="aud both" title="${sub} episode${sub === 1 ? '' : 's'} · sub &amp; dub">${icon('cc')}${icon('mic')}<b>${sub}</b></span>`;
   return `${sub ? `<span class="aud sub" title="${sub} episode${sub === 1 ? '' : 's'} with subtitles">${icon('cc')}<b>${sub}</b></span>` : ''}`
     + `${dub ? `<span class="aud dub" title="${dub} episode${dub === 1 ? '' : 's'} dubbed">${icon('mic')}<b>${dub}</b></span>` : ''}`;
 }

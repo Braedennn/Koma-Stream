@@ -81,9 +81,6 @@ export async function watch(root, { params: [id], query, alive }) {
         <div class="pb-right">
           <button class="btn btn-ghost btn-sm btn-toggle" type="button" data-pref="autoNext" aria-label="Autoplay next episode" title="Play the next episode when this one ends">${icon('next')}<span class="lbl">Autoplay</span><span class="tg" aria-hidden="true"></span></button>
           <button class="btn btn-ghost btn-sm btn-toggle" type="button" data-pref="skip" aria-label="Skip intro and outro" title="Jump past openings and endings automatically">${icon('skip')}<span class="lbl">Skip intro &amp; outro</span><span class="tg" aria-hidden="true"></span></button>
-          <span class="pb-sep" aria-hidden="true"></span>
-          <button class="btn btn-ghost btn-sm" type="button" data-seen-btn></button>
-          ${listBtn(a.id).replace('class="btn btn-ghost"', 'class="btn btn-ghost btn-sm"')}
         </div>
       </div>
         <aside class="ep-panel" aria-label="Episodes">
@@ -102,6 +99,10 @@ export async function watch(root, { params: [id], query, alive }) {
               <h1><a href="/anime/${a.id}" data-title-link>${esc(name(a))}</a></h1>
               <p class="ep-line"></p>
               <p class="syn">${esc(plain(a.description) || 'No synopsis yet.')}</p>
+              <div class="now-actions">
+                <button class="btn btn-ghost btn-sm" type="button" data-seen-btn hidden></button>
+                ${listBtn(a.id).replace('class="btn btn-ghost"', 'class="btn btn-ghost btn-sm"')}
+              </div>
             </div>
           </div>
         </div>
@@ -111,6 +112,14 @@ export async function watch(root, { params: [id], query, alive }) {
 
   initRails(root);
   initAudioBadges(root);
+
+  // Long synopses clamp to four lines; click to unfold (and back).
+  const syn = $('.now .syn', root);
+  syn.title = 'Click to expand';
+  syn.addEventListener('click', () => {
+    syn.classList.toggle('open');
+    syn.title = syn.classList.contains('open') ? 'Click to collapse' : 'Click to expand';
+  });
 
   const shell = $('.player-shell', root);
   const $seg = $('[data-seg]', root);
@@ -356,7 +365,8 @@ export async function watch(root, { params: [id], query, alive }) {
       seenBtn.innerHTML = `${icon('check')}${done ? 'Watched' : 'Mark watched'}`;
       seenBtn.dataset.seen = ep.n;
     } else seenBtn.hidden = true;
-    $('.now .ep-line', root).textContent = ep ? `Episode ${ep.n}${a.episodes ? ` of ${a.episodes}` : ''}${ep.title ? ` · ${ep.title}` : ''}` : '';
+    const epTitle = ep.title && ep.title !== `Episode ${ep.n}` ? ` · ${ep.title}` : ''; // default titles say it twice otherwise
+    $('.now .ep-line', root).textContent = ep ? `Episode ${ep.n}${a.episodes ? ` of ${a.episodes}` : ''}${epTitle}` : '';
     syncAudioUI();
     refreshEpList();
   }

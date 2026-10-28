@@ -22,10 +22,10 @@ export async function home(root, { alive }) {
       <div id="continue" hidden></div>
       ${d.trending ? row({ title: 'Trending now', sub: 'What everyone is watching this week.', link: '/browse?sort=TRENDING_DESC', body: d.trending.map(a => card(a)).join('') }) : ''}
       ${d.airing ? row({ title: `${now} season`, sub: 'Airing right now, most popular first.', link: `/browse?season=${d.season.season}&year=${d.season.year}`, body: d.airing.map(a => card(a)).join('') }) : ''}
-      ${d.top ? row({ title: 'Top 10 of all time', sub: 'The highest rated anime on AniList.', link: '/browse?sort=SCORE_DESC', linkLabel: 'Full ranking', wide: true, body: d.top.map(rankCard).join('') }) : ''}
+      ${d.top ? row({ title: 'Top 10 of all time', sub: 'The highest rated anime on AniList.', link: '/browse?sort=SCORE_DESC', wide: true, body: d.top.map(rankCard).join('') }) : ''}
       ${d.upcoming ? row({ title: `Coming ${next}`, sub: 'Next season’s most anticipated shows.', link: `/browse?season=${d.nextSeason.season}&year=${d.nextSeason.year}`, body: d.upcoming.map(a => card(a)).join('') }) : ''}
       ${d.genres.length ? `<section class="row">
-        <div class="row-head"><div><h2>Browse by genre</h2><p>Jump straight into what you’re in the mood for.</p></div></div>
+        <div class="row-head"><h2 class="section-title">Browse by genre<span>Jump straight into what you’re in the mood for.</span></h2></div>
         <div class="genre-grid">${d.genres.map(genreTile).join('')}</div>
       </section>` : ''}
     </div>`;
@@ -47,7 +47,7 @@ async function continueWatching(slot, alive) {
     const left = media.filter(a => saved[a.id] || watchedSet(a.id).size < (airedCount(a) || Infinity));
     if (!alive() || !left.length) return;
     slot.insertAdjacentHTML('afterend', row({
-      title: 'Continue watching', sub: 'Pick up where you left off.', link: '/list', linkLabel: 'Library',
+      title: 'Continue watching', sub: 'Pick up where you left off.', link: '/list',
       body: left.map(a => {
         const p = saved[a.id];
         const note = p && Number.isFinite(p.dur) && p.dur - p.t > 30 ? `${Math.max(1, Math.round((p.dur - p.t) / 60))} min left` : '';
