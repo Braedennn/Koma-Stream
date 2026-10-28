@@ -40,7 +40,7 @@ const fmt = s => {
 export class Player {
   /**
    * @param container element that gets .kplayer
-   * @param {object} hooks - onPrev, onNext, onEnded(ep), onAudio(type), onProgress(t, dur), drawerHTML()
+   * @param {object} hooks - onPrev, onNext, onEnded(ep), onAudio(type), onProgress(t, dur), onSeek(t, dur), drawerHTML()
    */
   constructor(container, hooks) {
     this.hooks = hooks || {};
@@ -410,6 +410,7 @@ export class Player {
     on(v, 'pause', () => { this.el.play.innerHTML = icon('play'); root.classList.remove('playing'); this.saveProgressNow(); this.hooks.onPause?.(); });
     on(v, 'ended', () => this.onEnded());
     on(v, 'timeupdate', () => this.onTime());
+    on(v, 'seeked', () => this.hooks.onSeek?.(v.currentTime, v.duration)); // scrub drop, skip jumps, resume points: the profile bar must follow instantly
     on(v, 'progress', () => {
       try {
         const b = v.buffered;

@@ -77,6 +77,21 @@ export function presenceProgress(t, dur) {
   setActivity(watchingActivity({ ...watching, startedAt: now - t * 1000, duration: dur }));
 }
 
+/** A seek landed: scrub drop, Skip Intro/Outro, a resume point jump, arrow keys. The
+ *  profile's bar re-anchors here and now — instantly, without waiting for the
+ *  throttled progress tick — so it always means where in the episode you are.
+ *  Rapid seeks (scrub preview, bursts) collapse into one trailing push. */
+let seekTimer = null;
+export function presenceSeek(t, dur) {
+  if (!watching) return;
+  if (!Number.isFinite(t) || t < 0 || !Number.isFinite(dur) || dur <= 0) return;
+  watching.startedAt = Date.now() - t * 1000;
+  watching.duration = dur;
+  clearTimeout(seekTimer);
+  if (watching.paused) return; // paused shows no bar; it takes the anchor back up on resume
+  seekTimer = setTimeout(() => setActivity(watchingActivity(watching)), 250);
+}
+
 /** Paused: stop the timing bar, or it would keep running while nothing plays. */
 export function presencePaused() {
   if (!watching) return;

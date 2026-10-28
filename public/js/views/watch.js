@@ -6,7 +6,7 @@ import { addToList, setWatched, watchedSet } from '../store.js';
 import { $, $$, big, card, episodeIndex, esc, icon, img, initRails, listBtn, name, plain, row, setTitle, toast, when, ytId } from '../ui.js';
 import { Player, ensureHls, getPref, setPref } from '../player.js';
 import { streamWatch, getAudioPref, setAudioPref, initAudioBadges, audioCounts } from '../streaming.js';
-import { presencePaused, presenceProgress, presenceResumed, presenceStopped, presenceWatching } from '../presence.js';
+import { presencePaused, presenceProgress, presenceResumed, presenceSeek, presenceStopped, presenceWatching } from '../presence.js';
 
 const PKEY = 'koma.progress';
 const readProgress = () => { try { return JSON.parse(localStorage.getItem(PKEY) || '{}'); } catch { return {}; } };
@@ -154,6 +154,7 @@ export async function watch(root, { params: [id], query, alive }) {
     },
     onPause: () => presencePaused(),
     onPlay: () => { const p = player; if (p?.video) presenceResumed(p.video.currentTime, p.video.duration); },
+    onSeek: (t, dur) => { if (mode === 'episode' && playable(ep)) presenceSeek(t, dur); },
     drawerHTML,
     nextLabel: () => { const t = nextTarget(); return t ? `E${t.n}${t.title ? ` · ${t.title}` : ''}` : ''; },
   };

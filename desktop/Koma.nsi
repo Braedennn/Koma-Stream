@@ -4,7 +4,7 @@
 !include "FileFunc.nsh"
 
 !define APPNAME "Koma"
-!define VERSION "1.0.8"
+!define VERSION "1.0.9"
 !define PUB "TotallyNoire"
 
 Name "${APPNAME} ${VERSION}"
@@ -15,7 +15,7 @@ RequestExecutionLevel user
 SetCompressor /SOLID lzma
 BrandingText "${APPNAME}"
 
-VIProductVersion "1.0.8.0"
+VIProductVersion "1.0.9.0"
 VIAddVersionKey "LegalCopyright" "TotallyNoire"
 VIAddVersionKey "ProductName" "${APPNAME}"
 VIAddVersionKey "CompanyName" "${PUB}"
