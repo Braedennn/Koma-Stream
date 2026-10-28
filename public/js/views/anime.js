@@ -1,4 +1,4 @@
-import { api, airingSchedule, sourceEpisodes, seasonChain } from '../api.js';
+import { api, airingSchedule, sourceEpisodes, seasonChain, watchOrder } from '../api.js';
 import { watchedSet } from '../store.js';
 import { presenceAnime, setActivity } from '../presence.js';
 import {
@@ -28,9 +28,11 @@ export async function anime(root, { params: [id], query, alive }) {
   const rel = (a.relations?.edges || []).filter(e => e.node);
   const recs = (a.recommendations?.nodes || []).map(n => n.mediaRecommendation).filter(Boolean);
   const startable = a.status !== 'NOT_YET_RELEASED';
+  const linked = (rel || []).some(e => (e.relationType === 'PREQUEL' || e.relationType === 'SEQUEL') && e.node?.type === 'ANIME');
   const tabs = [
     ['overview', 'Overview'],
     ['episodes', 'Episodes', a.episodes || ''],
+    linked && ['order', 'Watch order', ''],
     cast.length && ['characters', 'Characters', cast.length],
     (rel.length || recs.length) && ['related', 'Related', rel.length + recs.length],
   ].filter(Boolean);
@@ -82,6 +84,7 @@ export async function anime(root, { params: [id], query, alive }) {
     panel.style.animation = '';
     if (k === 'overview') overview(panel, a);
     else if (k === 'episodes') episodes(panel, a, alive);
+    else if (k === 'order') orderTab(panel, a, alive);
     else if (k === 'characters') characters(panel, cast);
     else related(panel, rel, recs);
     if (scroll) $('.tabs', root).scrollIntoView({ behavior: 'smooth' });
@@ -93,6 +96,20 @@ export async function anime(root, { params: [id], query, alive }) {
   });
   $('[data-trailer]', root)?.addEventListener('click', () => show('overview', { scroll: true, play: true }));
   show(tab);
+
+  // The watch order needs its own walk, so it fills the tab count in later — or drops the tab
+  // entirely when this title turns out to stand alone.
+  if (linked) watchOrder(a).then(wo => {
+    if (!alive()) return;
+    const b = $('.tab[data-tab="order"]', root);
+    if (!b) return;
+    if (wo.line.length < 2) {
+      b.hidden = true;
+      if (tab === 'order') show('overview', { scroll: true });
+      return;
+    }
+    b.innerHTML = `Watch order <small>${wo.line.length}</small>`;
+  });
 }
 
 function trailer(id, title) {
@@ -215,4 +232,34 @@ function related(panel, rel, recs) {
     ${recs.length ? `<section><h2 class="section-title">You might also like</h2><div class="grid">${recs.map(r => card(r)).join('')}</div></section>` : ''}
   </div>`;
 }
+
+/** The Watch order tab: the story line in intended watch order, your title highlighted, and the
+ *  franchise's side stories and spin-offs after the line as extras. */
+async function orderTab(panel, a, alive) {
+  panel.innerHTML = `<div class="wo-list">${Array.from({ length: 5 }, () => '<div class="sk wo-sk"></div>').join('')}</div>`;
+  const wo = await watchOrder(a);
+  if (!alive() || !wo || !panel.isConnected) return;
+  const line = wo.line.filter(Boolean);
+  if (line.length < 2) {
+    panel.innerHTML = `<div class="empty-state"><div class="bubble">${icon('list')}</div><h2>Nothing to order</h2><p>There’s no sequel, prequel or side story here — this title stands on its own.</p></div>`;
+    return;
+  }
+  const meta = m => [pretty(m.format), m.episodes && `${m.episodes} eps`, fuzzyDate(m.startDate),
+    m.status === 'RELEASING' ? 'Airing' : m.status === 'NOT_YET_RELEASED' ? 'Upcoming' : ''].filter(Boolean).join(' · ');
+  const row = (m, i) => {
+    const here = m.id === a.id;
+    return `${here
+      ? `<div class="wo-row active">`
+      : `<a class="wo-row" href="/anime/${m.id}">`}
+      <span class="wo-n">${i + 1}</span>
+      <span class="wo-poster">${img(m.coverImage?.large || m.coverImage?.medium, here ? `Cover of ${name(m)}` : '')}</span>
+      <span class="wo-body"><b>${esc(name(m))}</b><small>${esc(meta(m))}</small></span>
+      <span class="wo-chips">${here ? '<span class="chip wo-here">You are here</span>' : i === 0 ? '<span class="chip">Start here</span>' : ''}${m.status === 'RELEASING' ? '<span class="chip live">Airing</span>' : ''}</span>
+    </${here ? 'div' : 'a'}>`;
+  };
+  panel.innerHTML = `<div class="wo-list">${line.map(row).join('')}</div>
+    ${wo.extras.length ? `<section class="wo-extras"><h2 class="section-title">Extras<span>side stories & spin-offs · not needed to follow the story</span></h2>
+      <div class="grid">${wo.extras.map(({ m, rel }) => card({ ...m, coverImage: { large: m.coverImage?.large || m.coverImage?.medium, color: m.coverImage?.color } }, { note: pretty(rel) })).join('')}</div></section>` : ''}`;
+}
+
 

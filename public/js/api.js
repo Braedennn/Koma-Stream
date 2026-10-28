@@ -80,3 +80,50 @@ export function seasonChain(a) {
   p.then(list => list.forEach(m => chains.has(m.id) || chains.set(m.id, p))); // same chain from any member
   return p;
 }
+
+/**
+ * The story order around a title, for the Watch order tab: the full prequel→sequel line (every
+ * anime format counts — a movie inside the line is part of the story) plus the side stories and
+ * spin-offs hanging off that line, fetched and sorted by start date. Unlike seasonChain this
+ * keeps films and OVAs in the line itself and picks up more hops (franchises like Monogatari
+ * run deep), so it's slower — the tab loads it in the background and it stays cached.
+ */
+const orders = new Map();
+export function watchOrder(a) {
+  if (orders.has(a.id)) return orders.get(a.id);
+  const seen = new Set([a.id]);
+  const walk = async rel => {
+    const out = [];
+    let m = a;
+    for (let hop = 0; hop < 10; hop++) {
+      const edges = (m.relations?.edges || []).filter(x => x.relationType === rel && x.node?.type === 'ANIME' && !seen.has(x.node.id));
+      if (!edges.length) break;
+      const e = edges.find(x => SEASON_FORMATS.includes(x.node.format)) || edges[0]; // a real season beats a recap movie when both follow
+      seen.add(e.node.id);
+      m = await api(`/anime/${e.node.id}`).catch(() => null);
+      if (!m) break;
+      out.push(m);
+    }
+    return out;
+  };
+  const dateKey = d => (((d?.year ?? 0) * 10000) + ((d?.month ?? 0) * 100) + (d?.day ?? 0));
+  const p = Promise.all([walk('PREQUEL'), walk('SEQUEL')]).then(async ([before, after]) => {
+    const line = [...before.reverse(), a, ...after];
+    // Side stories and spin-offs of anything on the line become the tab's "extras".
+    const extras = new Map();
+    for (const m of line)
+      for (const e of m.relations?.edges || [])
+        if ((e.relationType === 'SIDE_STORY' || e.relationType === 'SPIN_OFF') && e.node?.type === 'ANIME' && !seen.has(e.node.id))
+          extras.set(e.node.id, { rel: e.relationType, node: e.node });
+    const picks = [...extras.values()].sort((x, y) => dateKey(x.node.startDate) - dateKey(y.node.startDate)).slice(0, 12);
+    return {
+      line,
+      extras: (await Promise.all(picks.map(x => api(`/anime/${x.node.id}`)
+        .then(m => (m ? { rel: x.rel, m } : null)).catch(() => null)))).filter(Boolean),
+    };
+  }).catch(() => ({ line: [a], extras: [] }));
+  orders.set(a.id, p);
+  p.then(o => o.line.forEach(m => orders.has(m.id) || orders.set(m.id, p))); // same order from any member
+  return p;
+}
+
