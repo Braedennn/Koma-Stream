@@ -588,7 +588,7 @@ export class Player {
 
   onEnded() {
     this.saveProgressNow();
-    this.hooks.onEnded?.(this.state.ep);
+    this.hooks.onEnded?.(this.state.ep, this.video?.duration);
     if (prefs.autoNext && this.state.hasNext && !this.state.advancing) this.nextEpisode();
   }
 

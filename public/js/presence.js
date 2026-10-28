@@ -57,6 +57,7 @@ export function presenceForRoute(path = location.pathname) {
   if (path.startsWith('/browse')) return presencePage('Browsing anime');
   if (path.startsWith('/schedule')) return presencePage('Checking the schedule');
   if (path.startsWith('/list')) return presencePage('Browsing My list');
+  if (path.startsWith('/stats')) return presencePage('Reviewing watch stats');
   return presencePage('Browsing Koma');
 }
 

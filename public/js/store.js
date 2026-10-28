@@ -60,3 +60,34 @@ export function mergeRemote(entries) {
   if (changed) save(null, true);
   return changed;
 }
+
+/* ---------- the watch journal ----------
+ * One event per finished episode, purely local fruit: this is what the Stats page,
+ * streaks and badges run on. Separate key, so list/progress data never shifts shape.
+ * Rewatches are their own event — they happened. */
+const JKEY = 'koma.journal.v1';
+const JCAP = 2000;
+
+function loadJournal() {
+  try {
+    const j = JSON.parse(localStorage.getItem(JKEY));
+    return Array.isArray(j) ? j.filter(e => e && Number.isInteger(e.ep) && Number.isFinite(e.at)) : [];
+  } catch { return []; }
+}
+let journal = loadJournal();
+const saveJournal = () => { try { localStorage.setItem(JKEY, JSON.stringify(journal)); } catch { /* full: memory keeps newest */ } };
+
+export function journalEpisode(id, ep, { dur = null, type = 'sub' } = {}) {
+  journal.push({
+    id,
+    ep,
+    at: Date.now(),
+    dur: Number.isFinite(dur) && dur > 0 ? Math.round(dur) : null,
+    type: type === 'dub' ? 'dub' : 'sub',
+  });
+  if (journal.length > JCAP) journal = journal.slice(journal.length - JCAP);
+  saveJournal();
+  dispatchEvent(new CustomEvent('koma:journal', { detail: { id, ep } }));
+}
+
+export const readJournal = () => journal.map(e => ({ ...e }));

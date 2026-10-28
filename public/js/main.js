@@ -8,6 +8,7 @@ import { watch } from './views/watch.js';
 import { browse } from './views/browse.js';
 import { schedule } from './views/schedule.js';
 import { list } from './views/list.js';
+import { stats } from './views/stats.js';
 import { notFound } from './views/notfound.js';
 import { initAudioBadges } from './streaming.js';
 import { initNotifications } from './notify.js';
@@ -21,6 +22,7 @@ const routes = [
   [/^\/browse\/?$/, browse],
   [/^\/schedule\/?$/, schedule],
   [/^\/list\/?$/, list],
+  [/^\/stats\/?$/, stats],
   [/^\/auth\/anilist\/?$/, authAniList],
 ];
 

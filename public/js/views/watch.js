@@ -2,7 +2,7 @@
 // Episode and audio changes swap the stream in place — the player element is
 // never torn down between episodes, so fullscreen and playback carry over.
 import { api, airingSchedule, sourceEpisodes } from '../api.js';
-import { addToList, setWatched, watchedSet } from '../store.js';
+import { addToList, setWatched, watchedSet, journalEpisode } from '../store.js';
 import { $, $$, big, card, episodeIndex, esc, icon, img, initRails, listBtn, name, plain, row, setTitle, toast, when, ytId } from '../ui.js';
 import { Player, ensureHls, getPref, setPref } from '../player.js';
 import { streamWatch, getAudioPref, setAudioPref, initAudioBadges, audioCounts } from '../streaming.js';
@@ -138,7 +138,7 @@ export async function watch(root, { params: [id], query, alive }) {
   const hooks = {
     onPrev: goPrev,
     onNext: goNext,
-    onEnded: n => { mark(n, true, true); writeProgress(a.id, null); },
+    onEnded: (n, dur) => { mark(n, true, true); journalEpisode(a.id, n, { dur, type }); writeProgress(a.id, null); },
     onAudio: t => switchAudio(t),
     onRefresh: () => loadStream({ keepTime: true, fresh: true }),
     onProgress: (t, dur) => {
