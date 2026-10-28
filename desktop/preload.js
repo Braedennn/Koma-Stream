@@ -7,8 +7,6 @@ contextBridge.exposeInMainWorld('koma', {
   // the site only says what should be on the profile.
   presence: {
     state: () => ipcRenderer.invoke('koma:presence:state'),
-    setEnabled: on => ipcRenderer.invoke('koma:presence:set-enabled', Boolean(on)),
-    setClientId: id => ipcRenderer.invoke('koma:presence:client-id', String(id || '')),
     activity: activity => ipcRenderer.send('koma:presence:activity', activity),
     clear: () => ipcRenderer.send('koma:presence:clear'),
     onStatus: cb => ipcRenderer.on('koma:presence:status', (_e, state) => cb(state)),

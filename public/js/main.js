@@ -12,7 +12,6 @@ import { notFound } from './views/notfound.js';
 import { initAudioBadges } from './streaming.js';
 import { initNotifications } from './notify.js';
 import { initPresence, presenceForRoute, setActivity } from './presence.js';
-import { initSettings } from './settings.js';
 import { account, clientId, finishLogin, initAutoSync, loginUrl, REDIRECT, setClientId, signOut, syncNow, syncPending } from './anilist.js';
 
 const routes = [
@@ -272,4 +271,3 @@ document.addEventListener('keydown', e => {
 
 render();
 initPresence().catch(() => {});
-initSettings();

@@ -6,26 +6,18 @@ const PROGRESS_MS = 15000; // a new timestamp every 15s is plenty
 
 const bridge = () => window.koma?.presence || null;
 
-let state = { enabled: false, configured: false, connected: false, clientId: '', error: '' };
+let state = { connected: false, status: '', clientId: '', error: '' };
 let last = null;             // the activity we last asked for
 let watching = null;         // what the watch page is playing right now
 let progressAt = 0;
 
-export const presenceAvailable = () => Boolean(bridge());
-export const presenceStatus = () => ({ ...state });
-
 function apply(s) {
-  const wasEnabled = state.enabled;
   state = {
-    enabled: Boolean(s?.enabled),
-    configured: Boolean(s?.configured),
     connected: Boolean(s?.connected),
+    status: String(s?.status || ''),
     clientId: String(s?.clientId || ''),
     error: String(s?.error || ''),
   };
-  dispatchEvent(new CustomEvent('koma:presence', { detail: { ...state } }));
-  // Turning it on from the settings mid-session: show what we're on right away.
-  if (state.enabled && !wasEnabled) bridge()?.activity(watching ? watchingActivity(watching) : last);
 }
 
 /** Ask the app shell for the current state and listen for changes. */
@@ -36,21 +28,6 @@ export async function initPresence() {
   api.onStatus(apply);
 }
 
-export async function setPresenceEnabled(on) {
-  const api = bridge();
-  if (!api) return null;
-  apply(await api.setEnabled(on));
-  if (!on) { watching = null; }
-  return { ...state };
-}
-
-export async function setPresenceClientId(id) {
-  const api = bridge();
-  if (!api) return null;
-  apply(await api.setClientId(id));
-  return { ...state };
-}
-
 export function setActivity(activity) {
   const api = bridge();
   if (!api) return;
@@ -58,14 +35,10 @@ export function setActivity(activity) {
   api.activity(last);
 }
 
-/** Discord joins external covers with an `mp:external/<base64-of-url>` asset key — its client
- *  fetches the image itself (Spotify's album art works the same way). Falls back to Koma's own
- *  uploaded logo when it comes. */
-const coverImage = cover => {
-  const src = String(cover || '');
-  if (!/^https?:\/\//.test(src)) return 'koma';
-  try { return `mp:external/${btoa(src)}`; } catch { return 'koma'; } // non-ASCII URL: art beats nothing
-};
+/** Discord downloads plain https cover URLs itself for large_image/small_image — the client
+ *  fetches them straight from AniList, no uploaded asset needed. No cover, no key:
+ *  a dead key is worse than none. */
+const coverImage = cover => (/^https?:\/\//.test(String(cover || '')) ? String(cover) : undefined);
 
 /** The page you're on, when you're not watching something. */
 export function presencePage(label) {

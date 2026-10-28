@@ -18,6 +18,11 @@ const RETRY_MAX = 60000;
 /** Discord's activity fields are length-limited; trim before they go out. */
 const clip = (v, max) => String(v ?? '').slice(0, max);
 
+/** Asset keys take either an uploaded asset name (≤128 chars) or a plain https URL,
+ *  which Discord downloads itself — URLs have no length limit and must not pass
+ *  through the clip, or long cover URLs get truncated and never resolve. */
+const imgKey = v => (/^https?:\/\//.test(String(v ?? '')) ? String(v) : clip(v, 128));
+
 class DiscordRpc extends EventEmitter {
   constructor({ clientId, pipePrefixes = PREFIXES, pipes = PIPES_EACH } = {}) {
     super();
@@ -226,9 +231,9 @@ function buildActivity({ details, state, image, largeImage, largeText, smallImag
   if (!Object.keys(activity.timestamps).length) delete activity.timestamps;
 
   const assets = {};
-  if (largeImage) assets.large_image = clip(largeImage, 128);
+  if (largeImage) assets.large_image = imgKey(largeImage);
   if (largeText) assets.large_text = clip(largeText, 128);
-  if (smallImage) assets.small_image = clip(smallImage, 128);
+  if (smallImage) assets.small_image = imgKey(smallImage);
   if (smallText) assets.small_text = clip(smallText, 128);
   if (Object.keys(assets).length) activity.assets = assets;
 
@@ -240,7 +245,7 @@ function buildActivity({ details, state, image, largeImage, largeText, smallImag
     if (bs.length) activity.buttons = bs;
   }
 
-  if (image) activity.image = clip(image, 128); // small_image alias used by some builds
+  if (image) activity.image = imgKey(image); // small_image alias used by some builds
   if (!activity.details && !activity.state) return null;
   return activity;
 }

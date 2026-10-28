@@ -40,9 +40,6 @@
     </label>
     <ul id="suggest" class="suggest" role="listbox" aria-label="Suggestions" hidden></ul>
   </form>
-  <button class="icon-btn settings-btn" id="settings-btn" type="button" aria-label="App settings" title="App settings">
-    <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.4 3.5h3.2l.5 2.1 2 .8 1.9-1.1 2.3 2.3-1.1 1.9.8 2 2.1.5v3.2l-2.1.5-.8 2 1.1 1.9-2.3 2.3-1.9-1.1-2 .8-.5 2.1h-3.2l-.5-2.1-2-.8-1.9 1.1-2.3-2.3 1.1-1.9-.8-2-2.1-.5v-3.2l2.1-.5.8-2-1.1-1.9 2.3-2.3 1.9 1.1 2-.8z"/><circle cx="12" cy="12" r="3.4"/></svg>
-  </button>
   <div class="acct" id="acct"></div>
 </header>
 
@@ -61,22 +58,6 @@
     <div class="modal-actions">
       <button class="btn btn-ghost btn-sm" value="cancel" formnovalidate>Cancel</button>
       <button class="btn btn-primary btn-sm" value="ok" id="al-continue">Continue to AniList</button>
-    </div>
-  </form>
-</dialog>
-
-<dialog class="modal" id="app-settings" aria-labelledby="app-settings-title">
-  <form method="dialog" class="modal-body">
-    <h2 id="app-settings-title">App settings</h2>
-    <p class="muted">These belong to the Koma desktop app, not to the website.</p>
-    <label class="switch"><input type="checkbox" id="rp-enabled"><span class="knob"></span>Discord Rich Presence</label>
-    <p class="rp-note" id="rp-note"></p>
-    <label class="field"><span class="sr">Discord Client ID</span><input id="rp-client" inputmode="numeric" autocomplete="off" placeholder="Discord Application ID"></label>
-    <p class="fine">Optional: Koma connects with its own Discord app by default. Paste a different Application ID here only if you want a custom presence name or artwork.</p>
-    <p class="modal-err" id="rp-err" hidden></p>
-    <div class="modal-actions">
-      <button class="btn btn-ghost btn-sm" type="button" id="rp-save">Save Client ID</button>
-      <button class="btn btn-primary btn-sm" value="ok">Done</button>
     </div>
   </form>
 </dialog>

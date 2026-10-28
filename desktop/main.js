@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
 const { DiscordRpc, buildActivity } = require('./discord-rpc');
+const { newerVersion, apply: applyAsset } = require('./updater');
 
 const PORT = 4000;
 // localhost (not 127.0.0.1): it's the address the AniList sign-in sends you back to, and it keeps
@@ -210,12 +211,6 @@ ipcMain.on('koma:notify', (_e, { title, body, url }) => {
 // Discord alive and pushes it onto your profile.
 const SETTINGS = () => path.join(app.getPath('userData'), 'settings.json');
 const readSettings = () => { try { return JSON.parse(fs.readFileSync(SETTINGS(), 'utf8')) || {}; } catch { return {}; } };
-const writeSettings = patch => {
-  try {
-    fs.mkdirSync(path.dirname(SETTINGS()), { recursive: true });
-    fs.writeFileSync(SETTINGS(), JSON.stringify({ ...readSettings(), ...patch }, null, 2));
-  } catch { /* settings are best-effort */ }
-};
 
 /** Where the Discord Application's Client ID comes from: the environment first
  *  (handy for testing), then the one saved in the app's settings, then the
@@ -235,8 +230,6 @@ const presence = { client: null, status: 'off', activity: null };
 // The download page rides along under every activity: anyone who sees the presence can reach it.
 const DEFAULT_BUTTONS = [{ label: 'Download Koma', url: 'https://www.totallynoire.xyz/koma' }];
 const presenceState = () => ({
-  enabled: readSettings().discordRp !== false, // ships on, like a game — the switch stores the off-rare case
-  configured: Boolean(discordClientId()),
   connected: Boolean(presence.client?.ready),
   status: presence.status,
   error: String(presence.client?.lastError || ''),
@@ -269,18 +262,6 @@ function stopPresence() {
 }
 
 ipcMain.handle('koma:presence:state', () => presenceState());
-ipcMain.handle('koma:presence:set-enabled', (_e, on) => {
-  writeSettings({ discordRp: Boolean(on) });
-  if (on) startPresence(); else stopPresence();
-  return presenceState();
-});
-ipcMain.handle('koma:presence:client-id', (_e, id) => {
-  const clientId = String(id || '').trim();
-  if (clientId && !/^\d+$/.test(clientId)) throw new Error('The Discord Client ID is the number under your app’s General Information.');
-  writeSettings({ discordClientId: clientId });
-  if (readSettings().discordRp) startPresence();
-  return presenceState();
-});
 ipcMain.on('koma:presence:activity', (_e, activity) => {
   const built = activity ? buildActivity({ ...activity, buttons: DEFAULT_BUTTONS }) : null;
   presence.activity = built;
@@ -290,22 +271,18 @@ ipcMain.on('koma:presence:clear', () => { presence.activity = null; presence.cli
 
 /* ---------- update checks (GitHub releases) ---------- */
 const UPDATE_REPO = 'Braedennn/Koma-Stream';
+const UPDATES = path.join(app.getPath('userData'), 'update');
 let updateShown = false;
-const newerVersion = (a, b) => {
-  const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d > 0; }
-  return false;
-};
 
-/** A small in-app card — never a native dialog. Its links flow through the
- *  existing external handler, so "Update now" opens the release download in
- *  the default browser; the NSIS installer then upgrades the app in place. */
-function injectUpdateCard(remote, downloadUrl, releaseUrl) {
+/** A small in-app card — never a native dialog. It never asks for a click to apply:
+ *  updates download and open the installer on their own; the card just says so and
+ *  breaks the only way out of a blocked download (a manual link) if that happens. */
+function injectUpdateCard(remote, releaseUrl, downloadUrl, failure) {
   if (!win || win.isDestroyed()) return;
   const url = win.webContents.getURL();
   if (!url.startsWith(URL_HOME) && !url.startsWith(PROBE)) return; // only on the app's own pages
   const ver = JSON.stringify(remote), cur = JSON.stringify(app.getVersion());
-  const dl = JSON.stringify(downloadUrl), rn = JSON.stringify(releaseUrl);
+  const rn = JSON.stringify(releaseUrl), dl = JSON.stringify(downloadUrl || releaseUrl), fail = JSON.stringify(failure || '');
   win.webContents.executeJavaScript(`(() => {
     if (document.getElementById('koma-update')) return;
     const css = document.createElement('style');
@@ -328,18 +305,30 @@ function injectUpdateCard(remote, downloadUrl, releaseUrl) {
       + '#koma-update button:hover{color:#fff;background:rgba(255,255,255,.08)}';
     document.head.appendChild(css);
     const card = document.createElement('div');
-    card.id = 'koma-update';
-    card.innerHTML = '<div class="ku-logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg></div>'
-      + '<div><b>Update available</b><span>Koma ' + ${ver} + ' is out — you have ' + ${cur} + '.</span>'
-      + '<div class="ku-actions"><a class="ku-go" href=' + ${dl} + '>Update now</a>'
+    card.id = 'koma-update';${'' /* auto mode: say what's happening and help exactly when the auto path failed */}
+    card.innerHTML = ${'' }
+      '<div class="ku-logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg></div>'
+      + '<div><b>' + 'Koma ' + ${ver} + ' is out' + '</b>'
+      + '<span class="ku-status">' + (${fail} ? 'Couldn\\''t update automatically: ' + ${fail} : ${'You'} + ' have Koma ' + ${cur} + ' — updating automatically, nothing to click.') + '</span>'
+      + '<div class="ku-actions">'
+      + (${fail} ? '<a class="ku-go" href=' + ${dl} + '>Download the installer</a>' : '')
       + '<a class="ku-notes" href=' + ${rn} + '>What changed</a>'
       + '<button type="button">Later</button></div></div>';
     document.body.appendChild(card);
     requestAnimationFrame(() => card.classList.add('in'));
     card.querySelector('button').addEventListener('click', () => { card.classList.remove('in'); setTimeout(() => card.remove(), 400); });
+    window.__kuProgress = pct => {
+      const s = document.querySelector('#koma-update .ku-status');
+      if (s) s.textContent = 'Updating automatically — downloading ' + pct + '%…';
+    };
     return 'rendered';
-  })()`).then(() => { try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] update card rendered\n`); } catch { /* best-effort */ } })
+  })()`).then(() => { try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] update card rendered (auto)\n`); } catch { /* best-effort */ } })
     .catch(err => { try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] update card failed: ${err.message}\n`); } catch { /* best-effort */ } });
+}
+
+function cardProgress(pct) {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.executeJavaScript(`window.__kuProgress && window.__kuProgress(${Math.max(0, Math.min(100, Math.round(pct)))});`).catch(() => {});
 }
 
 async function checkForUpdates() {
@@ -355,8 +344,20 @@ async function checkForUpdates() {
     const asset = (rel.assets || []).find(x => x.name === 'Koma-Setup.exe');
     if (remote && asset && newerVersion(remote, app.getVersion())) {
       updateShown = true;
-      fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] update popup: v${remote} (running v${app.getVersion()})\n`);
-      injectUpdateCard(remote, asset.browser_download_url, rel.html_url);
+      fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] auto-update: v${remote} (running v${app.getVersion()})\n`);
+      injectUpdateCard(remote, rel.html_url);
+      applyAsset({
+        url: asset.browser_download_url,
+        dir: UPDATES,
+        log: msg => { try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] ${msg}\n`); } catch { /* best-effort */ } },
+        onPct: cardProgress,
+        quitAfter: () => app.quit(), // the installer takes over; its NSIS script restarts Koma on finish
+      }).then(exe => {
+        try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] installer opened at ${exe}\n`); } catch { /* best-effort */ }
+      }).catch(err => {
+        fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] auto-update error: ${err.message}\n`);
+        injectUpdateCard(remote, rel.html_url, asset.browser_download_url, err.message); // the manual way, only when automation failed
+      });
     } else {
       fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] up to date (v${app.getVersion()})\n`);
     }
