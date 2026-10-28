@@ -17,6 +17,7 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 - Weekly airing schedule with countdowns, in your timezone
 - Personal list, watch progress, resume points, "continue watching" — saved locally, synced with your AniList account if you sign in
 - Sub/dub episode counts on every poster, so you know before you click
+- **Desktop notifications** when a show in your list drops a new episode — a Windows toast that opens straight into it
 
 **The player**
 - Custom-built on hls.js — plays **Japanese sub and English dub** where available, with a one-click toggle that remembers your preference
@@ -25,6 +26,7 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 
 **The app**
 - Everything runs locally and is bundled inside the app — no Node, no Python, no npm needed on your machine
+- **Discord Rich Presence** — the show and episode you're watching live on your Discord profile, with your current page when you're browsing (one-time setup in App settings)
 - All servers bind to 127.0.0.1 only — nothing is exposed to your network, no firewall prompts
 - Close the app and the servers it started stop with it
 - Logs, if you ever need them, live in `%APPDATA%\Koma\logs`
