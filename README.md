@@ -15,6 +15,7 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 **Catalog & tracking**
 - Live data from AniList: trending, seasonal, all-time top 10, genres, search with instant suggestions
 - Weekly airing schedule with countdowns, in your timezone
+- **Watch-order guides** — a title in a franchise shows its story line numbered (prequels first, movies in place), with your current spot marked and side stories / spin-offs listed as extras
 - Personal list, watch progress, resume points, "continue watching" — saved locally, auto-synced with your AniList account if you sign in (flaky connections can't lose an episode mark: failed writes retry from an outbox)
 - Sub/dub episode counts on every poster, so you know before you click
 - **Desktop notifications** when a show in your list drops a new episode — a Windows toast that opens straight into it
