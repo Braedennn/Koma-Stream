@@ -29,7 +29,7 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 **The app**
 - Everything runs locally and is bundled inside the app — no Node, no Python, no npm needed on your machine
 - **Discord Rich Presence** — what you're watching shows on your own Discord profile out of the box: the show's cover art, a play/pause badge, a timing bar that follows your exact position in the episode (seek and it jumps with you, like Spotify), and a button to the Koma download site; your current page shows while you're browsing
-- **Hands-free updates** — the app downloads a new release's installer itself, opens it for you, and relaunches after the upgrade — plus it sweeps away old update downloads from AppData
+- **Updates that ask first** — the app downloads a new release's installer in the background and asks "Update now?" before anything runs; release notes open in-app, and a put-off installer is kept for next launch — plus it sweeps away old update downloads from AppData
 - All servers bind to 127.0.0.1 only — nothing is exposed to your network, no firewall prompts
 - Close the app and the servers it started stop with it
 - Logs, if you ever need them, live in `%APPDATA%\Koma\logs`
