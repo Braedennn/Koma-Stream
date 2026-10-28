@@ -1,7 +1,7 @@
 {
   "name": "koma-desktop",
   "productName": "Koma",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Koma as a desktop app: starts the site and its streaming servers for you.",
   "main": "main.js",
   "private": true,

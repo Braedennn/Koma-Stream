@@ -15,6 +15,15 @@ import { initNotifications } from './notify.js';
 import { initPresence, presenceForRoute, setActivity } from './presence.js';
 import { account, clientId, finishLogin, initAutoSync, loginUrl, REDIRECT, setClientId, signOut, syncNow, syncPending } from './anilist.js';
 
+/* ---------- Koma stays in Koma ----------
+ * Middle-click here is autoscroll, not "open in browser", and nothing drags out —
+ * cover thumbnails dragged onto a browser tab would open the app's URL there, which
+ * isn't what Koma is for. Dropping things onto the window doesn't navigate either. */
+addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
+addEventListener('dragstart', e => e.preventDefault());
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => e.preventDefault());
+
 const routes = [
   [/^\/$/, home],
   [/^\/anime\/(\d+)\/?$/, anime],

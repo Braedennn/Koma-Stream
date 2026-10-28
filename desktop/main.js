@@ -138,7 +138,13 @@ function createWindow() {
   // Links to other sites (Crunchyroll, …) open in the normal browser; AniList's sign-in page
   // opens in a small window inside the app so the sign-in lands back here.
   const external = url => !url.startsWith(URL_HOME) && !url.startsWith(PROBE) && !url.startsWith('file:');
-  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    // Only real external links (Crunchyroll, AniList, …) reach the browser. Same-origin
+    // opens — middle-clicked cards, dragged thumbnails — are denied outright: the app is
+    // the destination, never a launcher for itself.
+    if (/^https?:/.test(url) && external(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
   win.webContents.on('will-navigate', (e, url) => {
     if (!external(url)) return;
     e.preventDefault();
