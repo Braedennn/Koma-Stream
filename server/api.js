@@ -1,5 +1,6 @@
 // JSON endpoints. Every query lives here, so the browser never talks to AniList directly.
 import { gql, UpstreamError } from './anilist.js';
+import { audioSnapshot } from './audio.js';
 
 const CARD = `id title{romaji english native} coverImage{extraLarge large medium color} bannerImage
   format episodes averageScore popularity season seasonYear status description(asHtml:false)
@@ -67,6 +68,11 @@ export async function genres() {
   return { genres: d.GenreCollection.filter(g => g !== 'Hentai') };
 }
 
+export async function tags() {
+  const d = await gql('query{MediaTagCollection{id name isAdult}}', {}, 86400);
+  return { tags: d.MediaTagCollection.filter(t => !t.isAdult).map(t => t.name) };
+}
+
 export async function browse(q) {
   const search = text(q.get('search'), 100);
   // AniList treats null filter args as "match nothing" (a behavior change that
@@ -74,9 +80,15 @@ export async function browse(q) {
   const vars = { p: int(q.get('page'), 1, 200) ?? 1 };
   const decl = ['$p:Int'];
   const args = ['type:ANIME', 'isAdult:false', 'sort:$sort'];
+  // Tags: one or many (comma-separated) — they combine as an AND of includes.
+  const tagList = String(q.get('tag') || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 8);
+  // Language: sub/dub comes from the local episode counts, not AniList, so a
+  // language-filtered page fetches a wider AniList slice and keeps the matches.
+  const lang = oneOf(q.get('lang'), ['sub', 'dub']);
   const filters = [
     ['search', 'q', 'String', search],
     ['genre', 'g', 'String', text(q.get('genre'), 40)],
+    ['tag_in', 't', '[String]', tagList.length ? tagList : null],
     ['seasonYear', 'y', 'Int', int(q.get('year'), 1940, 2100)],
     ['season', 's', 'MediaSeason', oneOf(q.get('season'), SEASONS)],
     ['format', 'f', 'MediaFormat', oneOf(q.get('format'), FORMATS)],
@@ -91,9 +103,15 @@ export async function browse(q) {
   const sort = oneOf(q.get('sort'), SORTS);
   vars.sort = sort ? [sort] : search ? ['SEARCH_MATCH', 'POPULARITY_DESC'] : ['POPULARITY_DESC'];
   decl.push('$sort:[MediaSort]');
-  const d = await gql(`query(${decl.join(',')}){Page(page:$p,perPage:30){pageInfo{total currentPage hasNextPage}
+  const perPage = lang ? 90 : 30;
+  const d = await gql(`query(${decl.join(',')}){Page(page:$p,perPage:${perPage}){pageInfo{total currentPage hasNextPage}
     media(${args.join(',')}){${CARD}}}}`, vars);
-  return { pageInfo: d.Page.pageInfo, media: d.Page.media };
+  let media = d.Page.media;
+  if (lang) {
+    const snap = audioSnapshot(media.map(m => m.id));
+    media = media.filter(m => (m.id in snap ? (lang === 'dub' ? snap[m.id].dub : snap[m.id].sub) > 0 : true));
+  }
+  return { pageInfo: d.Page.pageInfo, media };
 }
 
 export async function suggest(q) {

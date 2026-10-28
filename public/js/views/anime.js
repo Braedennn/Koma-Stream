@@ -1,5 +1,6 @@
 import { api, airingSchedule, sourceEpisodes, seasonChain } from '../api.js';
 import { watchedSet } from '../store.js';
+import { presenceAnime, setActivity } from '../presence.js';
 import {
   $, $$, big, card, episodeIndex, esc, fuzzyDate, icon, img, initSelect, listBtn, name, plain, pretty, score,
   selectHTML, setTitle, tint, when, ytId,
@@ -16,6 +17,7 @@ export async function anime(root, { params: [id], query, alive }) {
   const a = await api(`/anime/${id}`);
   if (!alive()) return;
   setTitle(name(a));
+  setActivity(presenceAnime(name(a)));
   sourceEpisodes(a.idMal); // warm it up: the Episodes tab and the watch page both need it
 
   const yt = ytId(a);

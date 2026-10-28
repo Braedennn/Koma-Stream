@@ -89,7 +89,10 @@ async function main() {
     extraResource: [sSite, sAni, sAll],
     appCopyright: 'TotallyNoire',
     win32metadata: { CompanyName: 'TotallyNoire', FileDescription: 'Koma', ProductName: 'Koma', InternalName: 'Koma', OriginalFilename: 'Koma.exe' },
-    ignore: [/^\/dist(\/|$)/, /^\/build\//, /^\/node_modules\//, /^\/koma-home\.txt$/, /^\/build\.mjs$/, /\.svg$/, /\.(bat|ps1|nsi)$/],
+    // build/ stays out of the app except its two icon assets (splash.html and
+    // the window icon reference them at runtime) — keep the png/ folder itself
+    // too, or the packager prunes it before the one file we keep inside it.
+    ignore: [/^\/dist(\/|$)/, /^\/build\/(?!icon\.ico$|png$|png\/256\.png$)/, /^\/node_modules\//, /^\/koma-home\.txt$/, /^\/build\.mjs$/, /\.svg$/, /\.(bat|ps1|nsi)$/],
   });
   const resources = path.join(out, 'resources');
   for (const part of ['app-site/server.js', 'anivault/dist/server.js', 'allanime/main.py', 'allanime/py/python.exe']) {

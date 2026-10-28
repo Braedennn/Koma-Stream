@@ -296,6 +296,18 @@ html:not(.has-hero) .top { background: var(--glass); border-bottom-color: var(--
 .opt-empty { padding: 10px; color: var(--text-3); font-size: 13px; }
 
 /* switch */
+
+/* multi-select chips */
+.select.multi .select-btn { min-width: 150px; max-width: 320px; height: auto; min-height: 40px; padding-block: 4px; }
+.select.multi .val { display: flex; flex-wrap: wrap; gap: 4px; white-space: normal; overflow: hidden; }
+.select.multi .val .ph { color: var(--text-2); }
+.sel-chip { display: inline-flex; align-items: center; gap: 2px; height: 21px; padding: 0 3px 0 9px; border-radius: 999px; background: var(--accent-soft); border: 1px solid rgba(124, 92, 255, .5); color: var(--accent-2); font-size: 11.5px; font-weight: 700; }
+.sel-chip i { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; cursor: pointer; transition: background .14s, color .14s; }
+.sel-chip i .i { width: 9px; height: 9px; }
+.sel-chip i:hover { background: rgba(255, 255, 255, .16); color: #fff; }
+.select.multi.set .select-btn { border-color: rgba(124, 92, 255, .55); }
+
+/* switch */
 .switch { position: relative; display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 13px; color: var(--text-2); cursor: pointer; user-select: none; transition: color .16s; }
 .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .switch .knob { position: relative; width: 40px; height: 22px; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--line-2); transition: background .2s var(--ease), border-color .2s; }
@@ -820,3 +832,10 @@ span.check[aria-pressed="true"]:hover { background: var(--good); border-color: v
 .modal .field { max-width: none; }
 .modal-err { color: var(--live) !important; font-size: 13px !important; margin: -4px 0 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.modal .fine { font-size: 12.5px; margin: -4px 0 0; }
+.rp-note { font-size: 13.5px !important; margin: -6px 0 0; }
+
+/* ---------- app settings button in the header ---------- */
+.settings-btn { width: 38px; height: 38px; }
+.settings-btn .i { width: 19px; height: 19px; }
+@media (max-width: 860px) { .settings-btn { display: none; } }

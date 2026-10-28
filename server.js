@@ -29,6 +29,7 @@ const PAGES = /^\/(?:anime\/\d+|watch\/\d+|browse|schedule|list|auth\/anilist)?\
 const API = [
   [/^\/api\/home$/, api.home],
   [/^\/api\/genres$/, api.genres],
+  [/^\/api\/tags$/, api.tags],
   [/^\/api\/browse$/, api.browse],
   [/^\/api\/suggest$/, api.suggest],
   [/^\/api\/media$/, api.many],

@@ -229,7 +229,21 @@ export function initHero(el) {
 }
 
 /* ---------- custom dropdown ---------- */
-export function selectHTML({ name: key, label, options, value = '', any = 'Any', find = options.length > 12, align = '' }) {
+export function selectHTML({ name: key, label, options, value = '', any = 'Any', find = options.length > 12, align = '', multi = false }) {
+  if (multi) {
+    // Multi-selects hold a comma-joined value; the button shows a chip per pick.
+    const sel = String(value).split(',').map(s => s.trim()).filter(Boolean);
+    const labelOf = v => options.find(([ov]) => String(ov) === String(v))?.[1] || v;
+    const chips = sel.map(v => `<span class="sel-chip" data-val="${esc(v)}">${esc(labelOf(v))}<i role="button" tabindex="-1" aria-label="Remove">${icon('x')}</i></span>`).join('');
+    return `<div class="select multi${sel.length ? ' set' : ''}${align ? ` ${align}` : ''}" data-name="${key}" data-value="${esc(sel.join(','))}" data-multi="true">
+      <button type="button" class="select-btn" aria-haspopup="listbox" aria-expanded="false"><small>${esc(label)}</small><span class="val">${chips || `<span class="ph">Any ${esc(label.toLowerCase())}</span>`}</span>${icon('down')}</button>
+      <div class="select-menu" role="listbox" aria-multiselectable="true" aria-label="${esc(label)}" tabindex="-1">
+        ${find ? `<div class="select-find"><input type="text" placeholder="Filter ${esc(label.toLowerCase())}" aria-label="Filter ${esc(label)}" autocomplete="off"></div>` : ''}
+        ${options.map(([v, l]) => `<div class="opt" role="option" data-value="${esc(v)}" aria-selected="${sel.includes(String(v))}"><span>${esc(l)}</span>${icon('check')}</div>`).join('')}
+        <div class="opt-empty" hidden>No matches</div>
+      </div>
+    </div>`;
+  }
   const all = any == null ? options : [['', any], ...options];
   const cur = all.find(([v]) => String(v) === String(value)) || all[0];
   return `<div class="select${value !== '' && any != null ? ' set' : ''}${align ? ` ${align}` : ''}" data-name="${key}" data-value="${esc(cur[0])}">
@@ -248,10 +262,12 @@ function closeSelects(except) {
 document.addEventListener('pointerdown', e => { if (!e.target.closest('.select')) closeSelects(); });
 
 export function initSelect(el, onChange) {
+  const multi = el.dataset.multi === 'true';
   const btn = $('.select-btn', el);
   const menu = $('.select-menu', el);
   const find = $('.select-find input', el);
   const visible = () => $$('.opt:not([hidden])', menu);
+  const labelOf = v => $(`.opt[data-value="${v}"] span`, menu)?.textContent || v;
   let active = -1;
   let typed = '';
   let typedAt = 0;
@@ -289,7 +305,23 @@ export function initSelect(el, onChange) {
     if (find) { find.value = ''; filter(''); }
     if (focus) btn.focus({ preventScroll: true });
   };
+  const paintMultiBtn = () => {
+    const list = el.dataset.value ? el.dataset.value.split(',').filter(Boolean) : [];
+    $('.val', el).innerHTML = list.map(v => `<span class="sel-chip" data-val="${esc(v)}">${esc(labelOf(v))}<i role="button" tabindex="-1" aria-label="Remove">${icon('x')}</i></span>`).join('')
+      || `<span class="ph">Any ${esc($('small', btn).textContent.toLowerCase())}</span>`;
+    el.classList.toggle('set', list.length > 0);
+  };
   const set = (v, notify) => {
+    if (multi) {
+      const list = el.dataset.value ? el.dataset.value.split(',').filter(Boolean) : [];
+      const at = list.indexOf(String(v));
+      at >= 0 ? list.splice(at, 1) : list.push(String(v));
+      el.dataset.value = list.join(',');
+      $$('.opt', menu).forEach(x => x.setAttribute('aria-selected', list.includes(x.dataset.value)));
+      paintMultiBtn();
+      if (notify) onChange?.(el.dataset.value);
+      return;
+    }
     const o = $$('.opt', menu).find(x => x.dataset.value === String(v)) || $('.opt', menu);
     el.dataset.value = o.dataset.value;
     $$('.opt', menu).forEach(x => x.setAttribute('aria-selected', x === o));
@@ -298,15 +330,22 @@ export function initSelect(el, onChange) {
     if (notify) onChange?.(o.dataset.value);
   };
   el._close = close;
-  el.setValue = v => set(v, false);
+  el.setValue = v => {
+    if (multi) { el.dataset.value = String(v ?? ''); $$('.opt', menu).forEach(x => x.setAttribute('aria-selected', el.dataset.value.split(',').includes(x.dataset.value))); paintMultiBtn(); }
+    else set(v, false);
+  };
 
-  btn.addEventListener('click', () => (el.classList.contains('open') ? close() : open()));
+  btn.addEventListener('click', e => {
+    const x = e.target.closest('.sel-chip i');
+    if (x) { set(x.closest('.sel-chip').dataset.val, true); return; } // remove one chip without opening the menu
+    el.classList.contains('open') ? close() : open();
+  });
   btn.addEventListener('keydown', e => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); open(); } });
   menu.addEventListener('click', e => {
     const o = e.target.closest('.opt');
     if (!o) return;
-    set(o.dataset.value, o.getAttribute('aria-selected') !== 'true');
-    close();
+    set(o.dataset.value, multi ? true : o.getAttribute('aria-selected') !== 'true');
+    if (!multi) close();
   });
   menu.addEventListener('mousemove', e => {
     const o = e.target.closest('.opt');
@@ -320,7 +359,7 @@ export function initSelect(el, onChange) {
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active - 1); }
     else if (e.key === 'Home' && !find) { e.preventDefault(); setActive(0); }
     else if (e.key === 'End' && !find) { e.preventDefault(); setActive(o.length - 1); }
-    else if (e.key === 'Enter') { e.preventDefault(); if (o[active]) { set(o[active].dataset.value, o[active].getAttribute('aria-selected') !== 'true'); close(); } }
+    else if (e.key === 'Enter') { e.preventDefault(); if (o[active]) { set(o[active].dataset.value, true); if (!multi) close(); } }
     else if (e.key === 'Escape') { e.preventDefault(); close(); }
     else if (e.key === 'Tab') close(false);
     else if (!find && e.key.length === 1) {

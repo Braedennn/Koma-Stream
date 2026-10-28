@@ -4,26 +4,33 @@ import { $, $$, card, errorBox, esc, icon, initSelect, pretty, selectHTML, setTi
 const SEASONS = ['WINTER', 'SPRING', 'SUMMER', 'FALL'];
 const FORMATS = ['TV', 'TV_SHORT', 'MOVIE', 'SPECIAL', 'OVA', 'ONA', 'MUSIC'];
 const STATUSES = ['RELEASING', 'FINISHED', 'NOT_YET_RELEASED', 'HIATUS', 'CANCELLED'];
-const SORTS = [['POPULARITY_DESC', 'Most popular'], ['TRENDING_DESC', 'Trending'], ['SCORE_DESC', 'Highest rated'],
+// The default order (the first, preselected option) IS popularity, so it is
+// not repeated here — that's what made the list show "Most popular" twice.
+const SORTS = [['TRENDING_DESC', 'Trending'], ['SCORE_DESC', 'Highest rated'],
   ['START_DATE_DESC', 'Newest'], ['FAVOURITES_DESC', 'Most favourited'], ['TITLE_ROMAJI', 'Title A–Z']];
-const LABELS = { genre: 'Genre', year: 'Year', season: 'Season', format: 'Format', status: 'Status', sort: 'Sort' };
+const LABELS = { genre: 'Genre', tag: 'Tags', lang: 'Language', year: 'Year', season: 'Season', format: 'Format', status: 'Status', sort: 'Sort' };
 
 const opts = list => list.map(v => [String(v), pretty(String(v))]);
 const headingFor = f => (f.search ? `Results for “${f.search}”` : f.genre ? `${f.genre} anime`
-  : f.season && f.year ? `${pretty(f.season)} ${f.year}` : f.sort === 'TRENDING_DESC' ? 'Trending' : f.sort === 'SCORE_DESC' ? 'Top rated' : 'Browse anime');
+  : f.tag ? `${f.tag} anime` : f.season && f.year ? `${pretty(f.season)} ${f.year}` : f.sort === 'TRENDING_DESC' ? 'Trending' : f.sort === 'SCORE_DESC' ? 'Top rated' : 'Browse anime');
 
 export async function browse(root, { query }) {
   const f = Object.fromEntries(['search', ...Object.keys(LABELS)].map(k => [k, query.get(k) || '']));
-  const { genres } = await api('/genres').catch(() => ({ genres: f.genre ? [f.genre] : [] }));
+  const [{ genres }, { tags }] = await Promise.all([
+    api('/genres').catch(() => ({ genres: f.genre ? [f.genre] : [] })),
+    api('/tags').catch(() => ({ tags: f.tag ? [f.tag] : [] })),
+  ]);
   const thisYear = new Date().getFullYear();
   const years = Array.from({ length: thisYear + 2 - 1960 }, (_, i) => String(thisYear + 1 - i));
 
   setTitle(headingFor(f));
   root.innerHTML = `<div class="page">
-    <div class="page-head"><div><h1>${esc(headingFor(f))}</h1><p>Filter by genre, season, format and more. Results load as you scroll.</p></div></div>
+    <div class="page-head"><div><h1>${esc(headingFor(f))}</h1><p>Filter by genre, tags, season, format and more. Results load as you scroll.</p></div></div>
     <form class="filter-bar" role="search" aria-label="Filter anime">
       <label class="field">${icon('search')}<span class="sr">Title</span><input name="search" type="search" value="${esc(f.search)}" placeholder="Search titles" autocomplete="off"></label>
       ${selectHTML({ name: 'genre', label: 'Genre', value: f.genre, options: genres.map(g => [g, g]) })}
+      ${selectHTML({ name: 'tag', label: 'Tags', value: f.tag, options: tags.map(t => [t, t]), find: true, multi: true })}
+      ${selectHTML({ name: 'lang', label: 'Language', value: f.lang, options: [['sub', 'Subbed'], ['dub', 'Dubbed']] })}
       ${selectHTML({ name: 'year', label: 'Year', value: f.year, options: years.map(y => [y, y]) })}
       ${selectHTML({ name: 'season', label: 'Season', value: f.season, options: opts(SEASONS) })}
       ${selectHTML({ name: 'format', label: 'Format', value: f.format, options: opts(FORMATS) })}
@@ -63,7 +70,15 @@ export async function browse(root, { query }) {
     const active = Object.keys(LABELS).filter(k => k !== 'sort' && s[k]);
     chips.innerHTML = `<span class="total">${total}</span>`
       + (s.search ? `<button class="chip-x" type="button" data-clear="search">“${esc(s.search)}”${icon('x')}</button>` : '')
-      + active.map(k => `<button class="chip-x" type="button" data-clear="${k}">${esc($(`.select[data-name="${k}"] .val`, form).textContent)}${icon('x')}</button>`).join('')
+      + active.flatMap(k => {
+        const el = $(`.select[data-name="${k}"]`, form);
+        if (el?.dataset.multi === 'true') {
+          // one removable chip per picked tag
+          return String(s[k]).split(',').filter(Boolean).map(v =>
+            `<button class="chip-x" type="button" data-clear="${k}:${esc(v)}">${esc($(`.opt[data-value="${v}"] span`, el)?.textContent || v)}${icon('x')}</button>`);
+        }
+        return [`<button class="chip-x" type="button" data-clear="${k}">${esc($('.val', el).textContent)}${icon('x')}</button>`];
+      })
       + (s.search || active.length ? '<button class="clear" type="button" data-clear="all">Clear all</button>' : '');
   };
 
@@ -113,9 +128,18 @@ export async function browse(root, { query }) {
   chips.addEventListener('click', e => {
     const b = e.target.closest('[data-clear]');
     if (!b) return;
-    const k = b.dataset.clear;
+    let k = b.dataset.clear;
+    let one = '';
+    const at = k.indexOf(':');
+    if (at > 0) { one = k.slice(at + 1); k = k.slice(0, at); }
     if (k === 'search' || k === 'all') input.value = '';
-    for (const el of selects) if (k === 'all' ? el.dataset.name !== 'sort' : el.dataset.name === k) el.setValue('');
+    for (const el of selects) {
+      if (k === 'all') { if (el.dataset.name !== 'sort') el.setValue(''); }
+      else if (el.dataset.name === k) {
+        if (one) el.setValue(String(el.dataset.value).split(',').filter(x => x !== one).join(',')); // remove a single tag
+        else el.setValue('');
+      }
+    }
     apply();
   });
   more.addEventListener('click', () => { more.textContent = 'Load more'; load(); });

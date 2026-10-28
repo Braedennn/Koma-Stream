@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { inList } from '../store.js';
+import { notifyPref, setNotifyPref } from '../notify.js';
 import { $, $$, esc, icon, img, name, relTime, setTitle, small, switchHTML } from '../ui.js';
 
 const DAY = 86400000;
@@ -48,7 +49,7 @@ export async function schedule(root, { query, alive }) {
       <button class="day-btn${i === todayIdx ? ' today' : ''}" type="button" role="tab" data-day="${i}" aria-selected="${i === day}">
         <small>${i === todayIdx ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short' })}</small><b>${d.getDate()}</b><span class="n">&nbsp;</span>
       </button>`).join('')}</div>
-    <div class="sched-tools"><span id="count">Loading…</span>${switchHTML('mine', 'Only my list', mine)}</div>
+    <div class="sched-tools"><span id="count">Loading…</span>${switchHTML('mine', 'Only my list', mine)}${switchHTML('airnotify', 'Desktop alerts', notifyPref())}${window.koma ? '' : '<span class="muted notif-hint">Desktop alerts fire in the app</span>'}</div>
     <div class="slots" id="slots">${Array.from({ length: 6 }, () => '<div class="sk" style="height:96px"></div>').join('')}</div>
   </div>`;
 
@@ -97,6 +98,7 @@ export async function schedule(root, { query, alive }) {
     paint();
   });
   $('#mine', root).addEventListener('change', e => { mine = e.target.checked; sync(); paint(); });
+  $('#airnotify', root).addEventListener('change', e => setNotifyPref(e.target.checked));
   paint();
   $('.day-btn[aria-selected="true"]', root)?.scrollIntoView({ block: 'nearest', inline: 'center' });
   // Keep the countdowns ("In 30m", "Aired") current while the page is open.

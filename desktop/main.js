@@ -1,11 +1,12 @@
 // Koma desktop app: starts Koma and both streaming servers in the background,
 // shows the site in its own window, and stops what it started when you quit.
 // Servers that are already running (start.bat, start-servers.ps1) are reused, not restarted.
-const { app, BrowserWindow, shell, Menu } = require('electron');
+const { app, BrowserWindow, shell, Menu, ipcMain, Notification } = require('electron');
 const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
+const { DiscordRpc, buildActivity } = require('./discord-rpc');
 
 const PORT = 4000;
 // localhost (not 127.0.0.1): it's the address the AniList sign-in sends you back to, and it keeps
@@ -122,7 +123,7 @@ function createWindow() {
     titleBarStyle: 'hidden',
     titleBarOverlay: IS_WIN ? { color: '#10111B', symbolColor: '#C9CCDA', height: 68 } : false,
     icon: path.join(__dirname, 'build', IS_WIN ? 'icon.ico' : 'png/256.png'),
-    webPreferences: { contextIsolation: true, sandbox: true },
+    webPreferences: { contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'preload.js') },
   });
   if (s.maximized) win.maximize();
   win.once('ready-to-show', () => win.show());
@@ -185,6 +186,183 @@ function signInWindow(url) {
 
 const status = text => { if (win && !win.isDestroyed()) win.webContents.executeJavaScript(`window.setStatus && setStatus(${JSON.stringify(text)})`).catch(() => {}); };
 
+/* ---------- desktop notifications (the site asks through the preload) ---------- */
+ipcMain.on('koma:notify', (_e, { title, body, url }) => {
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({
+      title: String(title || 'Koma'),
+      body: String(body || ''),
+      icon: path.join(__dirname, 'build', 'png', '256.png'),
+    });
+    n.on('click', () => {
+      if (!win || win.isDestroyed()) return;
+      if (win.isMinimized()) win.restore();
+      win.show(); win.focus();
+      if (url) win.loadURL(new URL(String(url), URL_HOME).toString());
+    });
+    n.show();
+  } catch { /* toasts are best-effort */ }
+});
+
+/* ---------- Discord Rich Presence ---------- */
+// The site says what you're watching; this process keeps the connection to
+// Discord alive and pushes it onto your profile.
+const SETTINGS = () => path.join(app.getPath('userData'), 'settings.json');
+const readSettings = () => { try { return JSON.parse(fs.readFileSync(SETTINGS(), 'utf8')) || {}; } catch { return {}; } };
+const writeSettings = patch => {
+  try {
+    fs.mkdirSync(path.dirname(SETTINGS()), { recursive: true });
+    fs.writeFileSync(SETTINGS(), JSON.stringify({ ...readSettings(), ...patch }, null, 2));
+  } catch { /* settings are best-effort */ }
+};
+
+/** Where the Discord Application's Client ID comes from: the environment first
+ *  (handy for testing), then the one saved in the app's settings, then the
+ *  one bundled with the build. */
+function discordClientId() {
+  const env = String(process.env.KOMA_DISCORD_CLIENT_ID || '').trim();
+  if (env) return env;
+  const saved = String(readSettings().discordClientId || '').trim();
+  if (saved) return saved;
+  try {
+    const bundled = JSON.parse(fs.readFileSync(path.join(__dirname, 'discord.json'), 'utf8'));
+    return String(bundled?.clientId || '').trim();
+  } catch { return ''; }
+}
+
+const presence = { client: null, status: 'off', activity: null };
+const presenceState = () => ({
+  enabled: Boolean(readSettings().discordRp),
+  configured: Boolean(discordClientId()),
+  connected: Boolean(presence.client?.ready),
+  status: presence.status,
+  error: String(presence.client?.lastError || ''),
+  clientId: discordClientId(),
+});
+const pushPresenceState = () => {
+  if (win && !win.isDestroyed()) win.webContents.send('koma:presence:status', presenceState());
+};
+
+function startPresence() {
+  const clientId = discordClientId();
+  if (!clientId) { presence.status = 'not-configured'; pushPresenceState(); return; }
+  presence.client?.close();
+  const client = new DiscordRpc({ clientId });
+  presence.client = client;
+  presence.status = 'connecting';
+  client.on('ready', () => { presence.status = 'connected'; pushPresenceState(); });
+  client.on('disconnected', () => { presence.status = 'connecting'; pushPresenceState(); });
+  client.on('error', err => { presence.status = 'error'; try { fs.appendFileSync(path.join(LOGS, 'presence.log'), `[${new Date().toISOString()}] ${err}\n`); } catch { /* logs are best-effort */ } pushPresenceState(); });
+  client.connect();
+  if (presence.activity) client.setActivity(presence.activity);
+  pushPresenceState();
+}
+
+function stopPresence() {
+  presence.client?.close();
+  presence.client = null;
+  presence.status = 'off';
+  pushPresenceState();
+}
+
+ipcMain.handle('koma:presence:state', () => presenceState());
+ipcMain.handle('koma:presence:set-enabled', (_e, on) => {
+  writeSettings({ discordRp: Boolean(on) });
+  if (on) startPresence(); else stopPresence();
+  return presenceState();
+});
+ipcMain.handle('koma:presence:client-id', (_e, id) => {
+  const clientId = String(id || '').trim();
+  if (clientId && !/^\d+$/.test(clientId)) throw new Error('The Discord Client ID is the number under your app’s General Information.');
+  writeSettings({ discordClientId: clientId });
+  if (readSettings().discordRp) startPresence();
+  return presenceState();
+});
+ipcMain.on('koma:presence:activity', (_e, activity) => {
+  const built = activity ? buildActivity(activity) : null;
+  presence.activity = built;
+  presence.client?.setActivity(built);
+});
+ipcMain.on('koma:presence:clear', () => { presence.activity = null; presence.client?.setActivity(null); });
+
+/* ---------- update checks (GitHub releases) ---------- */
+const UPDATE_REPO = 'Braedennn/Koma-Stream';
+let updateShown = false;
+const newerVersion = (a, b) => {
+  const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d > 0; }
+  return false;
+};
+
+/** A small in-app card — never a native dialog. Its links flow through the
+ *  existing external handler, so "Update now" opens the release download in
+ *  the default browser; the NSIS installer then upgrades the app in place. */
+function injectUpdateCard(remote, downloadUrl, releaseUrl) {
+  if (!win || win.isDestroyed()) return;
+  const url = win.webContents.getURL();
+  if (!url.startsWith(URL_HOME) && !url.startsWith(PROBE)) return; // only on the app's own pages
+  const ver = JSON.stringify(remote), cur = JSON.stringify(app.getVersion());
+  const dl = JSON.stringify(downloadUrl), rn = JSON.stringify(releaseUrl);
+  win.webContents.executeJavaScript(`(() => {
+    if (document.getElementById('koma-update')) return;
+    const css = document.createElement('style');
+    css.textContent = '#koma-update{position:fixed;right:22px;bottom:22px;z-index:95;display:flex;gap:13px;align-items:center;padding:16px 18px;border-radius:14px;'
+      + 'background:rgba(13,14,22,.86);border:1px solid rgba(255,255,255,.12);box-shadow:0 24px 60px -16px rgba(0,0,0,.9);'
+      + '-webkit-backdrop-filter:blur(22px) saturate(1.5);backdrop-filter:blur(22px) saturate(1.5);font:600 14px/1.5 Inter,system-ui,sans-serif;color:#F4F5FA;'
+      + 'max-width:340px;opacity:0;transform:translateY(16px);transition:opacity .3s,transform .35s cubic-bezier(.34,1.4,.5,1)}'
+      + '#koma-update.in{opacity:1;transform:none}'
+      + '#koma-update .ku-logo{flex:none;width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#7C5CFF,#B249F8 55%,#FF4ECD);display:grid;place-items:center;box-shadow:0 6px 18px -6px rgba(124,92,255,.5)}'
+      + '#koma-update .ku-logo svg{width:15px;height:15px;margin-left:1px}'
+      + '#koma-update b{display:block;font-size:14.5px;font-weight:800}'
+      + '#koma-update span{display:block;color:#A9AEC2;font-size:12.5px}'
+      + '#koma-update .ku-actions{display:flex;gap:7px;margin-top:9px}'
+      + '#koma-update a.ku-go{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 14px;border-radius:999px;text-decoration:none;'
+      + 'background:linear-gradient(135deg,#7C5CFF,#B249F8 55%,#FF4ECD);color:#fff;font-size:12.5px;font-weight:700;box-shadow:0 6px 16px -8px rgba(124,92,255,.55)}'
+      + '#koma-update a.ku-go:hover{filter:brightness(1.1)}'
+      + '#koma-update a.ku-notes{color:#A78BFF;font-size:12.5px;font-weight:700;text-decoration:none;align-self:center}'
+      + '#koma-update a.ku-notes:hover{color:#fff}'
+      + '#koma-update button{margin-left:auto;border:0;background:none;color:#6E7488;font-size:12.5px;font-weight:700;cursor:pointer;align-self:center;padding:6px 8px;border-radius:8px}'
+      + '#koma-update button:hover{color:#fff;background:rgba(255,255,255,.08)}';
+    document.head.appendChild(css);
+    const card = document.createElement('div');
+    card.id = 'koma-update';
+    card.innerHTML = '<div class="ku-logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg></div>'
+      + '<div><b>Update available</b><span>Koma ' + ${ver} + ' is out — you have ' + ${cur} + '.</span>'
+      + '<div class="ku-actions"><a class="ku-go" href=' + ${dl} + '>Update now</a>'
+      + '<a class="ku-notes" href=' + ${rn} + '>What changed</a>'
+      + '<button type="button">Later</button></div></div>';
+    document.body.appendChild(card);
+    requestAnimationFrame(() => card.classList.add('in'));
+    card.querySelector('button').addEventListener('click', () => { card.classList.remove('in'); setTimeout(() => card.remove(), 400); });
+    return 'rendered';
+  })()`).then(() => { try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] update card rendered\n`); } catch { /* best-effort */ } })
+    .catch(err => { try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] update card failed: ${err.message}\n`); } catch { /* best-effort */ } });
+}
+
+async function checkForUpdates() {
+  if (!BUNDLED || updateShown) return;
+  try {
+    const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Koma-Desktop' },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] check failed: HTTP ${r.status}\n`); return; }
+    const rel = await r.json();
+    const remote = String(rel.tag_name || '').replace(/^v/, '');
+    const asset = (rel.assets || []).find(x => x.name === 'Koma-Setup.exe');
+    if (remote && asset && newerVersion(remote, app.getVersion())) {
+      updateShown = true;
+      fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] update popup: v${remote} (running v${app.getVersion()})\n`);
+      injectUpdateCard(remote, asset.browser_download_url, rel.html_url);
+    } else {
+      fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] up to date (v${app.getVersion()})\n`);
+    }
+  } catch (err) {
+    try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] check error: ${err.message}\n`); } catch { /* logs are best-effort */ }
+  }
+}
+
 /* ---------- app lifecycle ---------- */
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
@@ -195,6 +373,7 @@ else {
 
   app.whenReady().then(async () => {
     createWindow();
+    if (readSettings().discordRp) startPresence();
     await win.loadFile(path.join(__dirname, 'splash.html'));
     if (!fs.existsSync(path.join(HOME, 'server.js'))) {
       status(`Can't find the Koma site in ${HOME}. Rebuild the app with build-app.bat from the WebsiteAnime\\desktop folder.`);
@@ -204,9 +383,14 @@ else {
     status('Almost ready…');
     if (await waitForKoma()) win.loadURL(URL_HOME);
     else status(`Koma didn't start. Check ${path.join(LOGS, 'koma.log')}`);
+    if (BUNDLED) { // packaged builds look for a newer GitHub release; dev runs skip this
+      fs.mkdirSync(LOGS, { recursive: true });
+      setTimeout(checkForUpdates, 9000); // let the page settle before the card slides in
+      setInterval(checkForUpdates, 6 * 3600e3); // and re-check every 6 hours of a long session
+    }
   });
 
   app.on('window-all-closed', () => app.quit());
-  app.on('will-quit', stopServers);
+  app.on('will-quit', () => { presence.client?.close(); stopServers(); });
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { stopServers(); process.exit(0); });
 }

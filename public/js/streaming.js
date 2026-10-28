@@ -26,7 +26,7 @@ export function streamWatch({ anilistId, ep, type, source = 'anikoto', server, f
   const hit = resolved.get(key);
   if (!fresh && hit && Date.now() - hit.at < RESOLVE_TTL) return hit.p;
   if (fresh) p.set('fresh', '1'); // tells Koma's server to skip its own short cache too
-  const req = fetch('/api/stream/watch?' + p).then(async res => {
+  const req = fetch('/api/stream/watch?' + p, { signal: AbortSignal.timeout(30000) }).then(async res => {
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(body.error || `The streaming server answered with status ${res.status}.`), { status: res.status });
     return body;

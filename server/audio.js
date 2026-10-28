@@ -149,11 +149,23 @@ export async function audioCounts(idsParam) {
     const c = cache.get(id);
     if (c && !c.miss) out[id] = { sub: c.sub, dub: c.dub };
     else {
-      const fresh = c && Date.now() - c.at < MISS_TTL; // recently checked: don't requeue
+      pending.push(id);
+      const fresh = c && Date.now() - c.at < MISS_TTL;
       if (!fresh && !queue.includes(id)) queue.push(id);
-      if (queue.includes(id)) pending.push(id);
     }
   }
   pump();
   return { counts: out, pending: pending.length };
+}
+
+/** Synchronous view of the count cache; unknown ids get lookups queued behind
+ *  the scenes so filtered results converge as the user keeps browsing. */
+export function audioSnapshot(ids) {
+  audioCounts(String(ids)).catch(() => {});
+  const out = {};
+  for (const id of ids) {
+    const c = cache.get(id);
+    if (c && !c.miss) out[id] = { sub: c.sub, dub: c.dub };
+  }
+  return out;
 }

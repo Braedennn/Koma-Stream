@@ -6,6 +6,7 @@ import { addToList, setWatched, watchedSet } from '../store.js';
 import { $, $$, big, card, episodeIndex, esc, icon, img, initRails, listBtn, name, plain, row, setTitle, toast, when, ytId } from '../ui.js';
 import { Player, ensureHls, getPref, setPref } from '../player.js';
 import { streamWatch, getAudioPref, setAudioPref, initAudioBadges, audioCounts } from '../streaming.js';
+import { presencePaused, presenceProgress, presenceResumed, presenceStopped, presenceWatching } from '../presence.js';
 
 const PKEY = 'koma.progress';
 const readProgress = () => { try { return JSON.parse(localStorage.getItem(PKEY) || '{}'); } catch { return {}; } };
@@ -27,7 +28,7 @@ export async function watch(root, { params: [id], query, alive }) {
   // Leaving the page stops the player and drops any stream still resolving.
   let loadSeq = 0;
   let player = null;
-  addEventListener('koma:route', () => { loadSeq++; player?.destroy(); player = null; }, { once: true });
+  addEventListener('koma:route', () => { loadSeq++; player?.destroy(); player = null; presenceStopped(); }, { once: true });
 
   const schedP = airingSchedule(Number(id)).catch(() => []); // doesn't need the title first
   let a = await api(`/anime/${id}`);
@@ -54,6 +55,12 @@ export async function watch(root, { params: [id], query, alive }) {
   let audio = null;
   let recs = (a.recommendations?.nodes || []).map(n => n.mediaRecommendation).filter(Boolean);
   const playable = e => e && !e.later;
+
+  /** What shows on the Discord profile while this page is open. */
+  function syncPresence() {
+    if (mode !== 'episode' || !playable(ep)) { presenceStopped(); return; }
+    presenceWatching({ title: name(a), episode: ep.n, episodeTitle: ep.title || '', type });
+  }
 
   setTitle(ep ? `${name(a)} · Episode ${ep.n}` : name(a));
 
@@ -137,6 +144,7 @@ export async function watch(root, { params: [id], query, alive }) {
     onProgress: (t, dur) => {
       if (mode !== 'episode' || !playable(ep)) return;
       if (t > 10 && Number.isFinite(dur) && dur - t > 25) writeProgress(a.id, { ep: ep.n, t, dur, at: Date.now() });
+      presenceProgress(t, dur); // the profile's progress bar
       // Resolve the next episode in the last couple of minutes so autoplay starts instantly.
       const nt = nextTarget();
       if (nt && prefetched !== `${a.id}:${nt.n}` && Number.isFinite(dur) && dur - t < 150) {
@@ -144,6 +152,8 @@ export async function watch(root, { params: [id], query, alive }) {
         streamWatch({ anilistId: a.id, ep: nt.n, type, source }).catch(() => {});
       }
     },
+    onPause: () => presencePaused(),
+    onPlay: () => { const p = player; if (p?.video) presenceResumed(p.video.currentTime, p.video.duration); },
     drawerHTML,
     nextLabel: () => { const t = nextTarget(); return t ? `E${t.n}${t.title ? ` · ${t.title}` : ''}` : ''; },
   };
@@ -213,7 +223,7 @@ export async function watch(root, { params: [id], query, alive }) {
     // Every source said "not found" for the dub: this episode isn't dubbed yet.
     if (!r && type === 'dub' && lastErr?.status === 404) {
       toast('No English dub for this episode — back to sub');
-      type = 'sub'; setAudioPref('sub'); syncUrl(); syncAudioUI();
+      type = 'sub'; setAudioPref('sub'); syncUrl(); syncAudioUI(); syncPresence();
       return loadStream();
     }
 
@@ -270,6 +280,7 @@ export async function watch(root, { params: [id], query, alive }) {
     setTitle(`${name(a)} · Episode ${ep.n}`);
     syncUrl();
     updateUI();
+    syncPresence();
     renderPlayerArea();
   }
 
@@ -280,6 +291,7 @@ export async function watch(root, { params: [id], query, alive }) {
     setAudioPref(t);
     syncUrl();
     syncAudioUI();
+    syncPresence();
     loadStream();
   }
 
@@ -351,7 +363,7 @@ export async function watch(root, { params: [id], query, alive }) {
   /* ---------- events ---------- */
   root.addEventListener('click', e => {
     const modeBtn = e.target.closest('[data-mode]');
-    if (modeBtn) { mode = modeBtn.dataset.mode; syncUrl(); updateUI(); renderPlayerArea(); return; }
+    if (modeBtn) { mode = modeBtn.dataset.mode; syncUrl(); updateUI(); syncPresence(); renderPlayerArea(); return; }
 
     const nav = e.target.closest('[data-nav]');
     if (nav && !nav.disabled) { nav.dataset.nav === 'prev' ? goPrev() : goNext(); return; }
@@ -400,6 +412,7 @@ export async function watch(root, { params: [id], query, alive }) {
 
   syncPrefUI();
   updateUI();
+  syncPresence();
   renderPlayerArea();
 
   if (!sourceEps) srcP.then(eps => {

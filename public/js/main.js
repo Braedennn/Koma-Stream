@@ -10,6 +10,9 @@ import { schedule } from './views/schedule.js';
 import { list } from './views/list.js';
 import { notFound } from './views/notfound.js';
 import { initAudioBadges } from './streaming.js';
+import { initNotifications } from './notify.js';
+import { initPresence, presenceForRoute, setActivity } from './presence.js';
+import { initSettings } from './settings.js';
 import { account, clientId, finishLogin, loginUrl, REDIRECT, setClientId, signOut, syncNow } from './anilist.js';
 
 const routes = [
@@ -115,11 +118,15 @@ async function render({ y = 0, focus = false } = {}) {
 
   const id = ++current;
   const ctx = { params, query: new URLSearchParams(location.search), alive: () => id === current && root.isConnected };
+  // The page you're on is the default presence; the watch and anime pages
+  // replace it with something more specific once they know their details.
+  setActivity(presenceForRoute(pathname));
   try { await view(root, ctx); }
   catch (err) {
     if (ctx.alive()) { html.classList.remove('has-hero'); errorBox(root, err, () => render()); }
   }
   initAudioBadges(root);
+  initNotifications(); // desktop air toasts — no-op in a normal browser
   solidHeader();
   if (y && ctx.alive()) requestAnimationFrame(() => scrollTo(0, y));
 }
@@ -252,3 +259,5 @@ document.addEventListener('keydown', e => {
 });
 
 render();
+initPresence().catch(() => {});
+initSettings();

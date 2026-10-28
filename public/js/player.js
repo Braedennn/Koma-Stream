@@ -21,10 +21,12 @@ export function setPref(key, value) {
 /** Load hls.js on first use instead of on every page (it's ~600 KB). */
 let hlsPromise;
 export const ensureHls = () => (hlsPromise ??= window.Hls ? Promise.resolve() : new Promise(resolve => {
+  const done = () => { clearTimeout(timer); resolve(); };
+  const timer = setTimeout(() => { hlsPromise = null; done(); }, 15000); // a hung script load must not hang the player
   const s = document.createElement('script');
   s.src = '/js/lib/hls.min.js';
-  s.onload = resolve;
-  s.onerror = () => { hlsPromise = null; resolve(); }; // falls back to native HLS / error message
+  s.onload = done;
+  s.onerror = () => { hlsPromise = null; done(); }; // falls back to native HLS / error message
   document.head.appendChild(s);
 }));
 
@@ -203,6 +205,7 @@ export class Player {
       if (pr?.then) pr.then(() => { this.el.start.hidden = true; }).catch(() => { this.el.start.hidden = false; });
     }
     this.container.dispatchEvent(new CustomEvent('koma:loaded', { bubbles: true }));
+    this.armStall(); // if this never becomes playable, tryRefresh takes over instead of an endless spinner
   }
 
   setAudio({ type, canDub, counts }) {
@@ -239,6 +242,7 @@ export class Player {
     this.video.removeAttribute('src');
     try { this.video.load(); } catch { /* gone */ }
     clearTimeout(this._stateTimer);
+    clearTimeout(this._stallTimer);
     clearInterval(this.saveInterval);
     clearTimeout(this.state.nextTimer); clearInterval(this.state.nextCountdown);
     this.removeListeners?.();
@@ -262,7 +266,7 @@ export class Player {
     const s = this.state;
     s.fatal = (s.fatal || 0) + 1;
     // Escalating ladder: give hls.js room to ride out upstream blips first,
-    // then recover the engine, then re-resolve a fresh signed URL once, and
+    // then recover the engine, then re-resolve a fresh signed URL, and
     // only then surface the error to the viewer.
     if (data.type === Hls.ErrorTypes.NETWORK_ERROR && s.fatal <= 4) {
       const delay = 400 * s.fatal;
@@ -276,12 +280,36 @@ export class Player {
     }
     if (!s.refreshed) {
       s.refreshed = true;
-      this.toastState('Stream broke — getting a fresh link');
-      this.saveProgressNow();
-      this.hooks.onRefresh?.();
+      this.tryRefresh('Stream broke — getting a fresh link');
       return;
     }
     this.showError('The stream stopped responding. Press Try again for a fresh link.');
+  }
+
+  /** One shared re-resolve path for mid-episode breakage and stalled loads.
+   *  A bad source can fail forever, so silent re-resolves are budgeted: two
+   *  inside five minutes, then the error screen with a manual retry. */
+  tryRefresh(reason) {
+    const now = Date.now();
+    if ((this._refreshTally || 0) >= 2 && now - (this._lastRefreshAt || 0) < 5 * 60e3) {
+      this.showError('The stream keeps failing — the source may be down. Try again in a moment, or pick another episode.', true);
+      return false;
+    }
+    this._refreshTally = (this._refreshTally || 0) + 1;
+    this._lastRefreshAt = now;
+    this.toastState(reason);
+    this.saveProgressNow();
+    this.hooks.onRefresh?.();
+    return true;
+  }
+
+  /** If an episode never becomes playable, don't spin forever: try one more
+   *  fresh link (through the same budget), then show the error screen. */
+  armStall(ms = 60000) {
+    clearTimeout(this._stallTimer);
+    this._stallTimer = setTimeout(() => {
+      if (!this.state.started && !this.el.busy.hidden) this.tryRefresh('Still loading — trying a fresh link');
+    }, ms);
   }
 
   /** Tiny non-blocking notice inside the player (reconnects etc). */
@@ -304,12 +332,16 @@ export class Player {
   }
 
   retry() {
+    this._refreshTally = 0; // the viewer asked for it — grant a fresh recovery budget
     if (!this._pending) return;
     const p = this._pending;
     this.load({ ...p, resumeAt: this.video.currentTime || p.resumeAt, hasNext: this.state.hasNext, hasPrev: this.state.hasPrev, title: this.el.now.querySelector('h3').textContent, ep: this.state.ep, type: this.state.type });
   }
 
-  spinner(on) { this.el.busy.hidden = !on; }
+  spinner(on) {
+    if (!on) clearTimeout(this._stallTimer); // playback began or an error screen is up — the watchdog is off
+    this.el.busy.hidden = !on;
+  }
 
   setCC(subtitles, type) {
     const v = this.video;
@@ -370,8 +402,12 @@ export class Player {
     on(v, 'loadedmetadata', () => { this.el.dur.textContent = fmt(v.duration); this.spinner(false); });
     on(v, 'canplay', () => this.spinner(false));
     on(v, 'waiting', () => this.spinner(true));
-    on(v, 'playing', () => { this.spinner(false); this.state.started = true; this.el.play.innerHTML = icon('pause'); root.classList.add('playing'); });
-    on(v, 'pause', () => { this.el.play.innerHTML = icon('play'); root.classList.remove('playing'); this.saveProgressNow(); });
+    on(v, 'playing', () => {
+      this.spinner(false); this.state.started = true; this.el.play.innerHTML = icon('pause'); root.classList.add('playing');
+      if (this.video.currentTime > 120) this._refreshTally = 0; // healthy deep playback earns a fresh recovery budget
+      this.hooks.onPlay?.();
+    });
+    on(v, 'pause', () => { this.el.play.innerHTML = icon('play'); root.classList.remove('playing'); this.saveProgressNow(); this.hooks.onPause?.(); });
     on(v, 'ended', () => this.onEnded());
     on(v, 'timeupdate', () => this.onTime());
     on(v, 'progress', () => {
