@@ -59,7 +59,7 @@ export async function watch(root, { params: [id], query, alive }) {
   /** What shows on the Discord profile while this page is open. */
   function syncPresence() {
     if (mode !== 'episode' || !playable(ep)) { presenceStopped(); return; }
-    presenceWatching({ title: name(a), episode: ep.n, episodeTitle: ep.title || '', type });
+    presenceWatching({ title: name(a), episode: ep.n, episodeTitle: ep.title || '', type, cover: a.coverImage?.extraLarge || a.coverImage?.large || '' });
   }
 
   setTitle(ep ? `${name(a)} · Episode ${ep.n}` : name(a));

@@ -58,14 +58,23 @@ export function setActivity(activity) {
   api.activity(last);
 }
 
+/** Discord joins external covers with an `mp:external/<base64-of-url>` asset key — its client
+ *  fetches the image itself (Spotify's album art works the same way). Falls back to Koma's own
+ *  uploaded logo when it comes. */
+const coverImage = cover => {
+  const src = String(cover || '');
+  if (!/^https?:\/\//.test(src)) return 'koma';
+  try { return `mp:external/${btoa(src)}`; } catch { return 'koma'; } // non-ASCII URL: art beats nothing
+};
+
 /** The page you're on, when you're not watching something. */
 export function presencePage(label) {
   return { details: label, state: 'Koma' };
 }
 
 /** An anime's own page. */
-export function presenceAnime(title) {
-  return { details: title, state: 'Browsing anime on Koma', largeImage: 'anilist', largeText: title };
+export function presenceAnime(title, cover) {
+  return { details: title, state: 'Browsing anime on Koma', largeImage: coverImage(cover), largeText: title };
 }
 
 /** The route you're on, mapped to something worth showing on a profile. */
@@ -121,14 +130,14 @@ export function presenceStopped() {
   progressAt = 0;
 }
 
-function watchingActivity({ title, episode, episodeTitle, type, startedAt, duration, paused }) {
+function watchingActivity({ title, episode, episodeTitle, type, cover, startedAt, duration, paused }) {
   const details = episode
     ? `Episode ${episode}${episodeTitle ? ` · ${episodeTitle}` : ''}`
     : 'Watching';
   const activity = {
     details,
     state: title || 'Koma',
-    largeImage: 'anilist',
+    largeImage: coverImage(cover),
     largeText: title || 'Koma',
     smallImage: paused ? 'pause' : 'play',
     smallText: type === 'dub' ? 'Dubbed' : 'Subbed',

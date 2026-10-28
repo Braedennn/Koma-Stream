@@ -232,8 +232,10 @@ function discordClientId() {
 }
 
 const presence = { client: null, status: 'off', activity: null };
+// The download page rides along under every activity: anyone who sees the presence can reach it.
+const DEFAULT_BUTTONS = [{ label: 'Download Koma', url: 'https://www.totallynoire.xyz/koma' }];
 const presenceState = () => ({
-  enabled: Boolean(readSettings().discordRp),
+  enabled: readSettings().discordRp !== false, // ships on, like a game — the switch stores the off-rare case
   configured: Boolean(discordClientId()),
   connected: Boolean(presence.client?.ready),
   status: presence.status,
@@ -280,7 +282,7 @@ ipcMain.handle('koma:presence:client-id', (_e, id) => {
   return presenceState();
 });
 ipcMain.on('koma:presence:activity', (_e, activity) => {
-  const built = activity ? buildActivity(activity) : null;
+  const built = activity ? buildActivity({ ...activity, buttons: DEFAULT_BUTTONS }) : null;
   presence.activity = built;
   presence.client?.setActivity(built);
 });
@@ -373,7 +375,7 @@ else {
 
   app.whenReady().then(async () => {
     createWindow();
-    if (readSettings().discordRp) startPresence();
+    if (readSettings().discordRp !== false) startPresence();
     await win.loadFile(path.join(__dirname, 'splash.html'));
     if (!fs.existsSync(path.join(HOME, 'server.js'))) {
       status(`Can't find the Koma site in ${HOME}. Rebuild the app with build-app.bat from the WebsiteAnime\\desktop folder.`);

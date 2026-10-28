@@ -4,7 +4,7 @@ import { $, toast } from './ui.js';
 import { presenceStatus, setPresenceClientId, setPresenceEnabled } from './presence.js';
 
 const noteFor = s => {
-  if (!s.configured) return 'Add your Discord app’s Client ID below to turn this on.';
+  if (!s.configured) return 'Paste your own Discord app’s Client ID below to enable this (Koma’s built-in ID is unavailable).';
   if (!s.enabled) return 'Show what you’re watching in Koma on your Discord profile.';
   if (s.connected) return 'Connected — your profile updates as you browse and watch.';
   if (s.error) return `Discord said: ${s.error}`;

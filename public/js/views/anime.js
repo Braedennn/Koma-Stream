@@ -17,7 +17,7 @@ export async function anime(root, { params: [id], query, alive }) {
   const a = await api(`/anime/${id}`);
   if (!alive()) return;
   setTitle(name(a));
-  setActivity(presenceAnime(name(a)));
+  setActivity(presenceAnime(name(a), a.coverImage?.extraLarge || a.coverImage?.large || ''));
   sourceEpisodes(a.idMal); // warm it up: the Episodes tab and the watch page both need it
 
   const yt = ytId(a);

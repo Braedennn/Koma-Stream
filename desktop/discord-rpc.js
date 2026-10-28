@@ -215,7 +215,7 @@ class DiscordRpc extends EventEmitter {
 }
 
 /** Shape an activity the way Discord expects, trimming every field to its limit. */
-function buildActivity({ details, state, image, largeImage, largeText, smallImage, smallText, startTimestamp, endTimestamp }) {
+function buildActivity({ details, state, image, largeImage, largeText, smallImage, smallText, startTimestamp, endTimestamp, buttons }) {
   const activity = {
     details: clip(details, 128),
     state: clip(state, 128),
@@ -231,6 +231,14 @@ function buildActivity({ details, state, image, largeImage, largeText, smallImag
   if (smallImage) assets.small_image = clip(smallImage, 128);
   if (smallText) assets.small_text = clip(smallText, 128);
   if (Object.keys(assets).length) activity.assets = assets;
+
+  if (buttons) {
+    const bs = buttons
+      .filter(b => b?.label && /^https?:\/\/./.test(b?.url))
+      .slice(0, 2)
+      .map(b => ({ label: clip(b.label, 32), url: clip(b.url, 512) }));
+    if (bs.length) activity.buttons = bs;
+  }
 
   if (image) activity.image = clip(image, 128); // small_image alias used by some builds
   if (!activity.details && !activity.state) return null;
