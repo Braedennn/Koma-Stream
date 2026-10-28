@@ -1,10 +1,12 @@
-// AniList account: sign in (AniList's "implicit grant" OAuth), pull your AniList anime list into
-// My list on every launch, and push My list / watched-episode changes back to AniList.
-// The token lives only in this browser/app (localStorage) and talks to AniList directly.
+// AniList account: sign in (AniList's "implicit grant" OAuth), then auto-sync both ways: your
+// Koma list/progress goes to AniList through a retry outbox (a failing push is retried, never
+// lost), and what you do elsewhere on AniList is pulled in while Koma is open. The token lives
+// only in this browser/app (localStorage) and talks to AniList directly.
 import { api } from './api.js';
 import { inList, listIds, mergeRemote, watchedSet } from './store.js';
 
 const KEY = 'koma.anilist';
+const QKEY = 'koma.sync.queue';
 const GQL = 'https://graphql.anilist.co';
 export const REDIRECT = `${location.origin}/auth/anilist`;
 
@@ -39,7 +41,9 @@ async function gql(query, variables = {}) {
     signOut();
     throw Object.assign(new Error('Your AniList sign-in expired. Sign in again.'), { status: 401 });
   }
-  if (!r.ok || d.errors) throw new Error(d.errors?.[0]?.message || `AniList answered with status ${r.status}.`);
+  if (!r.ok || d.errors) throw Object.assign(
+    new Error(d.errors?.[0]?.message || `AniList answered with status ${r.status}.`),
+    { status: r.status, retryAfter: Number(r.headers?.get?.('retry-after')) || 0 });
   return d.data;
 }
 
@@ -57,27 +61,114 @@ export async function finishLogin(hash) {
   return acct.user;
 }
 
-/** Pull AniList into My list, then push anything Koma has that AniList doesn't (or is further along on). */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const maxWatched = id => { const s = watchedSet(id); return s.size ? Math.max(...s) : 0; };
+const LIST_QUERY = `query($u:Int){MediaListCollection(userId:$u,type:ANIME){lists{entries{id mediaId status progress}}}}`;
+
+async function pullList() {
+  const d = await gql(LIST_QUERY, { u: acct.user.id });
+  remote.clear();
+  for (const l of d.MediaListCollection?.lists || []) for (const e of l.entries) remote.set(e.mediaId, e);
+  mergeRemote([...remote.values()].filter(e => e.status !== 'DROPPED'));
+}
+
+/** A full pass: pull the AniList list into Koma, then push what's ahead of AniList. */
 let syncing = null;
 export function syncNow() {
   if (!account()) return Promise.resolve(false);
   return (syncing ??= (async () => {
     try {
-      const d = await gql(`query($u:Int){MediaListCollection(userId:$u,type:ANIME){lists{entries{id mediaId status progress}}}}`, { u: acct.user.id });
-      remote.clear();
-      for (const l of d.MediaListCollection?.lists || []) for (const e of l.entries) remote.set(e.mediaId, e);
-      mergeRemote([...remote.values()].filter(e => e.status !== 'DROPPED'));
+      await pullList();
       for (const id of listIds()) {
         const r = remote.get(id);
-        if (!r || maxWatched(id) > (r.progress || 0)) { await push(id); await sleep(700); } // AniList allows ~90 requests a minute
+        if (!r || maxWatched(id) > (r.progress || 0)) { // AniList allows ~90 requests a minute
+          await push(id).catch(err => { if (transient(err) && err.status !== 401) enqueue([id], rateAfter(err)); });
+          await sleep(700);
+        }
       }
       return true;
     } finally { syncing = null; }
   })());
 }
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-const maxWatched = id => { const s = watchedSet(id); return s.size ? Math.max(...s) : 0; };
+/** Reconcile from AniList alone (no pushing): what you did on anilist.co or on another device. */
+export function syncPull() {
+  if (!account()) return Promise.resolve(false);
+  return (syncing ??= (async () => { try { await pullList(); return true; } finally { syncing = null; } })());
+}
+
+/* ---------- the outbox: changes AniList hasn't accepted yet ---------- */
+let outbox = (() => { try { const q = JSON.parse(localStorage.getItem(QKEY)); return Array.isArray(q) ? q.filter(Number.isInteger) : []; } catch { return []; } })();
+const persistBox = () => { try { localStorage.setItem(QKEY, JSON.stringify(outbox)); } catch { /* private mode */ } };
+const announce = () => dispatchEvent(new CustomEvent('koma:sync', { detail: { pending: outbox.length } }));
+export const syncPending = () => outbox.length;
+
+const transient = err => !err?.status || err.status === 429 || err.status >= 500 || Boolean(err?.retryAfter);
+// status 0 means the request never left (offline). 401 is its own flow: the token is dead, signOut already ran.
+const rateAfter = err => err?.retryAfter ? Math.max(10e3, err.retryAfter * 1000) : undefined;
+
+function enqueue(ids, at) {
+  let added = 0;
+  for (const id of ids) if (!outbox.includes(id)) { outbox.push(id); added++; }
+  if (!added) return false;
+  persistBox();
+  schedule(at);
+  announce();
+  return true;
+}
+
+function dequeue(id) {
+  const at = outbox.indexOf(id);
+  if (at < 0) return false;
+  outbox.splice(at, 1);
+  persistBox();
+  announce();
+  return true;
+}
+
+/* Sending it all out: each pump tries every queued show once; a failure leaves it queued.
+   Backoff per pump round, Retry-After respected where AniList sends one, and the whole queue
+   survives reloads. */
+const BACKOFF = [5000, 15000, 30000, 60000, 120000, 300000]; // then it stays at 5 minutes
+let attempt = 0, pumpTimer = null, pumping = false;
+
+function schedule(at) {
+  clearTimeout(pumpTimer);
+  if (!outbox.length) return;
+  pumpTimer = setTimeout(() => { pumpTimer = null; pump(); }, at ?? BACKOFF[Math.min(attempt, BACKOFF.length - 1)]);
+}
+
+async function pump() {
+  if (pumping || !outbox.length || !account()) return;
+  pumping = true;
+  let calmed = null; // a Retry-After the next pump should honor
+  try {
+    let failed = 0;
+    for (let i = 0; i < outbox.length;) {
+      const id = outbox[i];
+      try {
+        await push(id);
+        dequeue(id);
+        attempt = 0;
+      } catch (err) {
+        if (err?.status === 401) { outbox.length = 0; persistBox(); announce(); return; } // the local changes wait for the next sign-in
+        failed++;
+        if (transient(err)) i++; // stays queued; still try the other shows so one bad one can't block the rest
+        else { // AniList refused this one for good (bad request etc.) — keep it out, a later change retries it
+          dequeue(id);
+          dispatchEvent(new CustomEvent('koma:sync-error', { detail: err.message }));
+        }
+        if (err?.retryAfter) { calmed = Math.max(10e3, err.retryAfter * 1000); break; }
+      }
+      if (i < outbox.length || !failed) await sleep(700); // keep the ~90/minute budget
+    }
+    if (failed) attempt++;
+  } finally {
+    pumping = false;
+    if (outbox.length) schedule(calmed);
+    else attempt = 0;
+  }
+}
 
 /** Make AniList match Koma for one show. */
 async function push(id) {
@@ -102,7 +193,8 @@ async function push(id) {
   remote.set(id, e);
 }
 
-// Every change to My list / watched episodes goes to AniList shortly after (bursts collapse into one save per show).
+// Every change to My list / watched episodes goes to AniList shortly after (bursts collapse into
+// one save per show); a failure drops into the outbox, which retries on its own until it lands.
 const timers = new Map();
 addEventListener('koma:store', e => {
   const { id, remote: fromAniList } = e.detail || {};
@@ -110,6 +202,28 @@ addEventListener('koma:store', e => {
   clearTimeout(timers.get(id));
   timers.set(id, setTimeout(() => {
     timers.delete(id);
-    push(id).catch(err => dispatchEvent(new CustomEvent('koma:sync-error', { detail: err.message })));
+    push(id).then(() => dequeue(id)).catch(err => {
+      if (!transient(err)) { dispatchEvent(new CustomEvent('koma:sync-error', { detail: err.message })); return; }
+      if (enqueue([id], rateAfter(err))) dispatchEvent(new CustomEvent('koma:sync-error', { detail: `${err.message}. It will be retried automatically.` }));
+    });
   }, 1500));
 });
+
+/* ---------- keeping the session live: pull while Koma is open, flush the moment it matters ---------- */
+const PULL_EVERY = 10 * 60000;
+let lastPull = 0;
+
+function pullIfDue() {
+  if (!account() || Date.now() - lastPull < PULL_EVERY) return;
+  syncPull().then(s => { if (s) lastPull = Date.now(); }).catch(() => {});
+}
+
+/** Arm the auto-sync timers: a reconcile every 10 min while visible, and outbox flushes the second
+ *  the network returns or the app comes back up. Safe to call once at launch, and while signed out. */
+export function initAutoSync() {
+  lastPull = Date.now();
+  addEventListener('online', () => schedule(5000));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { schedule(5000); pullIfDue(); } });
+  setInterval(pullIfDue, PULL_EVERY);
+  if (outbox.length) { announce(); schedule(3000); }
+}

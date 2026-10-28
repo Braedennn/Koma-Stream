@@ -13,7 +13,7 @@ import { initAudioBadges } from './streaming.js';
 import { initNotifications } from './notify.js';
 import { initPresence, presenceForRoute, setActivity } from './presence.js';
 import { initSettings } from './settings.js';
-import { account, clientId, finishLogin, loginUrl, REDIRECT, setClientId, signOut, syncNow } from './anilist.js';
+import { account, clientId, finishLogin, initAutoSync, loginUrl, REDIRECT, setClientId, signOut, syncNow, syncPending } from './anilist.js';
 
 const routes = [
   [/^\/$/, home],
@@ -61,6 +61,7 @@ function paintAccount() {
         ${user.avatar ? `<img src="${esc(user.avatar)}" alt="">` : `<span>${esc(user.name[0] || '?')}</span>`}</button>
        <div class="acct-menu" role="menu" hidden>
          <p>Signed in to AniList as<b>${esc(user.name)}</b></p>
+         <p class="sync-pending" hidden></p>
          <button type="button" role="menuitem" data-acct="sync">${icon('reload')}Sync now</button>
          <a role="menuitem" href="https://anilist.co/user/${encodeURIComponent(user.name)}/animelist" target="_blank" rel="noopener">${icon('external')}My AniList</a>
          <button type="button" role="menuitem" data-acct="out">${icon('x')}Sign out</button>
@@ -79,12 +80,23 @@ $('#acct').addEventListener('click', async e => {
     toast('Syncing with AniList…');
     syncNow().then(() => toast('Synced with AniList')).catch(err => toast(err.message));
   }
+  if (act && $('.acct-btn')) paintSyncLine(); // the pending count may be stale from the last paint
 });
 document.addEventListener('click', e => { if (!e.target.closest('#acct')) { const m = $('.acct-menu'); if (m) m.hidden = true; } });
 addEventListener('koma:account', paintAccount);
 addEventListener('koma:sync-error', e => toast(`AniList: ${e.detail}`));
+function paintSyncLine() {
+  const el = $('#acct .sync-pending');
+  if (!el) return;
+  const n = syncPending();
+  el.hidden = !n;
+  if (n) el.textContent = n === 1 ? '1 change waiting to sync…' : `${n} changes waiting to sync…`;
+}
+addEventListener('koma:sync', paintSyncLine);
 paintAccount();
+paintSyncLine();
 syncNow().catch(err => toast(`AniList: ${err.message}`)); // pull your list every launch
+initAutoSync(); // mid-session pulls + pending-push flushes
 const html = document.documentElement;
 const header = $('#top');
 
