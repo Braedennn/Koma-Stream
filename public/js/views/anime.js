@@ -18,7 +18,7 @@ export async function anime(root, { params: [id], query, alive }) {
   if (!alive()) return;
   setTitle(name(a));
   setActivity(presenceAnime(name(a), a.coverImage?.extraLarge || a.coverImage?.large || ''));
-  sourceEpisodes(a.idMal); // warm it up: the Episodes tab and the watch page both need it
+  sourceEpisodes(a); // warm it up: the Episodes tab and the watch page both need it
 
   const yt = ytId(a);
   const rank = (a.rankings || []).find(r => r.type === 'RATED' && r.allTime);
@@ -275,10 +275,10 @@ const scheduleCache = new Map();
 async function episodes(panel, a, alive) {
   panel.innerHTML = `<div class="ep-grid">${Array.from({ length: 8 }, () => '<div class="sk" style="aspect-ratio:16/12"></div>').join('')}</div>`;
   if (!scheduleCache.has(a.id)) scheduleCache.set(a.id, airingSchedule(a.id).catch(() => []));
-  // The streaming server's list only adds titles/extra episodes: don't hold the tab more than 1.5s for it.
-  const [schedule, sourceEps] = await Promise.all([scheduleCache.get(a.id),
-    Promise.race([sourceEpisodes(a.idMal), new Promise(r => setTimeout(() => r([]), 1500))])]);
-  const list = episodeIndex(a, schedule, sourceEps);
+  // The episode list of this part comes from Koma: don't hold the tab more than 1.5s for it.
+  const [schedule, part] = await Promise.all([scheduleCache.get(a.id),
+    Promise.race([sourceEpisodes(a), new Promise(r => setTimeout(() => r(null), 1500))])]);
+  const list = episodeIndex(a, schedule, part?.episodes || [], part?.offset || 0);
   if (!alive() || !panel.isConnected) return;
   if (!list.length) {
     panel.innerHTML = `<nav class="season-pills" aria-label="Seasons" hidden></nav><div class="empty-state"><div class="bubble">${icon('tv')}</div><h2>No episodes yet</h2><p>AniList hasn’t listed episodes for this title. Check back once it starts airing.</p></div>`;

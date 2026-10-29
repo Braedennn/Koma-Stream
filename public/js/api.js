@@ -36,16 +36,24 @@ export async function airingSchedule(id, maxPages = 6) {
   return nodes;
 }
 
-/** The streaming source's episode list (titles, extra episodes). Shared by the title and watch pages. */
+/**
+ * The episode list of THIS part of the show, as Koma resolved it.
+ *
+ * The server works out which streaming entry holds the part that was asked for
+ * (a show split into cours is several entries, and the streaming server can
+ * land on the wrong one), then sends back that part's episodes with the
+ * titles and pictures that belong to them.
+ */
 const sourceEps = new Map();
-export function sourceEpisodes(malId) {
-  if (!malId) return Promise.resolve([]);
-  if (!sourceEps.has(malId)) {
-    sourceEps.set(malId, fetch(`/api/stream/episodes?malId=${malId}&source=anikoto`, { signal: AbortSignal.timeout(10000) })
-      .then(r => r.json()).then(d => (Array.isArray(d.episodes) ? d.episodes : []))
-      .catch(() => { sourceEps.delete(malId); return []; }));
+export function sourceEpisodes(a) {
+  const id = Number(a?.id ?? a);
+  if (!id) return Promise.resolve({ episodes: [], offset: 0 });
+  if (!sourceEps.has(id)) {
+    sourceEps.set(id, fetch(`/api/stream/episodes?anilistId=${id}&source=anikoto`, { signal: AbortSignal.timeout(25000) })
+      .then(r => r.json()).then(d => (Array.isArray(d.episodes) ? d : { episodes: [], offset: 0 }))
+      .catch(() => { sourceEps.delete(id); return { episodes: [], offset: 0 }; }));
   }
-  return sourceEps.get(malId);
+  return sourceEps.get(id);
 }
 
 /**

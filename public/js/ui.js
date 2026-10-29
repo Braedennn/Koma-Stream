@@ -383,15 +383,19 @@ export const switchHTML = (id, label, checked) =>
  * listings (titles, thumbnails, links) into one list of episodes. When the local
  * streaming source carries more episodes than AniList lists (source-side extras,
  * AniList undercounts), `sourceEps` extends the list so nothing playable is hidden.
+ *
+ * `offset` is where this part of the show starts inside a list that is numbered
+ * for the whole franchise: a show split into cours is one entry per part, but
+ * the lists the sites keep run through the whole season.
  */
-export function episodeIndex(a, schedule, sourceEps = []) {
+export function episodeIndex(a, schedule, sourceEps = [], offset = 0) {
   const named = new Map();
   (a.streamingEpisodes || []).forEach((e, i) => {
     const n = Number(e.title.match(/Episode\s+(\d+)/i)?.[1] ?? i + 1);
     if (!named.has(n)) named.set(n, { ...e, title: e.title.replace(/^Episode\s+\d+\s*[-:–]\s*/i, '') });
   });
   const stripNum = t => String(t || '').replace(/^Episode\s+\d+\s*[-:–]\s*/i, '');
-  const srcTitles = new Map(sourceEps.filter(e => Number.isFinite(Number(e.num))).map(e => [Number(e.num), stripNum(e.title)]));
+  const src = new Map(sourceEps.filter(e => Number.isFinite(Number(e.num))).map(e => [Number(e.num), e]));
   const dates = new Map(schedule.map(s => [s.episode, s.airingAt]));
   // AniList's streamingEpisodes and the local streaming source both sometimes
   // carry a whole franchise listing (every season merged) on one entry, which
@@ -401,16 +405,23 @@ export function episodeIndex(a, schedule, sourceEps = []) {
   // with no declared count at all trusts them fully.
   const listsMax = (arrs) => Math.max(0, ...arrs.flat());
   const cap = Math.max(a.episodes || 0, a.nextAiringEpisode ? a.nextAiringEpisode.episode - 1 : 0);
-  const highest = listsMax([[...named.keys()], [...srcTitles.keys()], [...dates.keys()]]);
+  const highest = listsMax([[...named.keys()], [...src.keys()], [...dates.keys()]]);
   const total = Math.min(3000, Math.max(a.episodes || 0, cap ? Math.min(highest, cap) : highest,
     a.nextAiringEpisode?.episode || 0, a.format === 'MOVIE' ? 1 : 0));
   const aired = a.nextAiringEpisode ? a.nextAiringEpisode.episode - 1 : a.status === 'NOT_YET_RELEASED' ? 0 : Infinity;
   return Array.from({ length: total }, (_, i) => {
     const n = i + 1;
-    const s = named.get(n);
+    // AniList's list is numbered for the whole season, so this part starts
+    // `offset` episodes in; the source's list is already this part's.
+    const s = named.get(n + offset);
+    const x = src.get(n);
+    const xt = x ? stripNum(x.title) : '';
+    // The source's own title wins when it says something ("Episode 12" does not).
+    const title = (xt && !/^episode\s*\d+$/i.test(xt)) ? xt
+      : (s?.title || xt || (a.format === 'MOVIE' && total === 1 ? 'Feature' : ''));
     return {
-      n, title: s?.title || srcTitles.get(n) || (a.format === 'MOVIE' && total === 1 ? 'Feature' : ''),
-      thumb: s?.thumbnail, url: s?.url, site: s?.site, at: dates.get(n), later: n > aired,
+      n, title,
+      thumb: x?.thumb || s?.thumbnail, url: s?.url, site: s?.site, at: dates.get(n), later: n > aired,
     };
   });
 }

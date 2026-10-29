@@ -28,20 +28,21 @@ export async function watch(root, { params: [id], query, alive }) {
 
   const schedP = airingSchedule(Number(id)).catch(() => []); // doesn't need the title first
   let a = await api(`/anime/${id}`);
-  const srcP = sourceEpisodes(a.idMal);
+  const srcP = sourceEpisodes(a);
   let schedule = await schedP;
   const asked = Number(query.get('ep'));
-  // The streaming server's episode list only adds titles and extra episodes, so don't
-  // hold the page for it: give it 1.5s, then draw with AniList's list and merge it in later.
-  // Wait for it fully only when AniList alone can't place the episode we're opening.
-  let sourceEps = await Promise.race([srcP, new Promise(r => setTimeout(() => r(null), 1500))]);
-  if (!sourceEps) {
+  // The episode list of this part comes from Koma, which knows which streaming
+  // entry holds it. Don't hold the page for it: give it 1.5s, then draw with
+  // AniList's list and merge the real one in later. Wait for it fully only
+  // when AniList alone can't place the episode we're opening.
+  let src = await Promise.race([srcP, new Promise(r => setTimeout(() => r(null), 1500))]);
+  if (!src) {
     const provisional = episodeIndex(a, schedule, []);
-    if (!provisional.length || (asked && !provisional.some(e => e.n === asked))) sourceEps = await srcP;
+    if (!provisional.length || (asked && !provisional.some(e => e.n === asked))) src = await srcP;
   }
   if (!alive()) return;
 
-  const list = episodeIndex(a, schedule, sourceEps || []);
+  const list = episodeIndex(a, schedule, src?.episodes || [], src?.offset || 0);
   let aired = list.filter(e => !e.later);
   let yt = ytId(a);
   let ep = list.find(e => e.n === asked) || aired.find(e => !watchedSet(a.id).has(e.n)) || aired.at(-1) || list[0];
@@ -422,9 +423,9 @@ export async function watch(root, { params: [id], query, alive }) {
   syncPresence();
   renderPlayerArea();
 
-  if (!sourceEps) srcP.then(eps => {
-    if (!alive() || !eps.length) return;
-    list.splice(0, list.length, ...episodeIndex(a, schedule, eps));
+  if (!src) srcP.then(part => {
+    if (!alive() || !part?.episodes?.length) return;
+    list.splice(0, list.length, ...episodeIndex(a, schedule, part.episodes, part.offset || 0));
     ep = list.find(e => e.n === ep?.n) || ep;
     aired = list.filter(e => !e.later);
     updateUI();
