@@ -17,6 +17,7 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 - Weekly airing schedule with countdowns, in your timezone
 - **Watch-order guides** — a title in a franchise shows its story line numbered (prequels first, movies in place), with your current spot marked and side stories / spin-offs listed as extras
 - Personal list, watch progress, resume points, "continue watching" — saved locally, auto-synced with your AniList account if you sign in (flaky connections can't lose an episode mark: failed writes retry from an outbox)
+- **Continue watching** — the rail on Home and the tab on My list show only what you actually watch *here*: episodes you finished in Koma, and the episode you're in the middle of, with the exact spot you stopped. A show you added to your AniList watchlist is on your list, but it never poses as something you're watching until you start it here
 - **"Surprise me" and a "For you" rail** — a die in the header rolls one random well-rated anime you've never seen, and Home grows a For you row from the genres you actually finish (recent watches weigh more, your own list never shows up)
 - **My take** — your own 1–10 score, a rewatch counter, tags and a private note on every show page, summarized on the stats page — all local, never sent anywhere
 - Sub/dub episode counts on every poster, so you know before you click
