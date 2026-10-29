@@ -15,5 +15,8 @@ contextBridge.exposeInMainWorld('koma', {
   // the explicit "Update now" click — nothing here fires on its own.
   update: {
     apply: () => ipcRenderer.invoke('koma:update:apply'),
+    check: () => ipcRenderer.invoke('koma:update:check'),
   },
+  // Version and update status for the footer's version line.
+  version: () => ipcRenderer.invoke('koma:version'),
 });

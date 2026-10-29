@@ -558,6 +558,21 @@ a.chip:hover { background: rgba(124, 92, 255, .14); color: #CDBEFF; border-color
 .foot nav a { width: fit-content; text-decoration: none; transition: color .16s, transform .16s var(--ease); }
 .foot nav a:hover { color: var(--accent-2); transform: translateX(2px); }
 .foot .fine { grid-column: 1 / -1; padding-top: 18px; border-top: 1px solid var(--line); font-size: 12.5px; }
+
+/* the version line: what you're on, and whether it's the latest build */
+.foot .foot-ver { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; max-width: none; margin: 16px 0 0; font-size: 12.5px; }
+.foot .foot-ver b { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.fv-state { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; color: var(--text-3); }
+.fv-state::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--text-3); }
+.fv-state.current::before { background: #4ade80; box-shadow: 0 0 8px rgba(74, 222, 128, .5); }
+.fv-state.outdated { color: #FFC94D; }
+.fv-state.outdated::before { background: #FFC94D; box-shadow: 0 0 8px rgba(255, 201, 77, .45); }
+.fv-state.unknown::before { background: #6E7488; }
+.fv-state.checking::before { background: var(--accent-2); animation: fv-pulse 1.3s ease-in-out infinite; }
+@keyframes fv-pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+.fv-update { margin-left: auto; border: 1px solid rgba(255, 201, 77, .45); background: rgba(255, 201, 77, .1); color: #FFC94D; font: 700 12px var(--font); padding: 6px 13px; border-radius: 999px; cursor: pointer; transition: background .16s var(--ease); }
+.fv-update:hover { background: rgba(255, 201, 77, .18); }
+.fv-update:disabled { opacity: .5; cursor: default; }
 .tabbar { display: none; }
 
 /* ---------- custom player ---------- */

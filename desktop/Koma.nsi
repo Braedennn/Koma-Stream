@@ -2,9 +2,10 @@
 ; Per-user install (no admin prompt), shortcuts, uninstaller, Add/Remove entry.
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "LogicLib.nsh"
 
 !define APPNAME "Koma"
-!define VERSION "1.4.0"
+!define VERSION "1.4.1"
 !define PUB "TotallyNoire"
 
 Name "${APPNAME} ${VERSION}"
@@ -15,7 +16,7 @@ RequestExecutionLevel user
 SetCompressor /SOLID lzma
 BrandingText "${APPNAME}"
 
-VIProductVersion "1.4.0.0"
+VIProductVersion "1.4.1.0"
 VIAddVersionKey "LegalCopyright" "TotallyNoire"
 VIAddVersionKey "ProductName" "${APPNAME}"
 VIAddVersionKey "CompanyName" "${PUB}"
@@ -45,7 +46,29 @@ Section "${APPNAME}" SecInstall
   SetOutPath "$INSTDIR"
   ; An upgrade while the app is open would fail to overwrite Koma.exe — stop it first
   ; (/T also stops the servers it started; ones running from start-servers.ps1 stay).
+  ; The app closes itself the moment it hands over to this installer, so this is
+  ; normally a no-op; a manual launch may still find it running. Kill it, then WAIT
+  ; until the process is really gone — copying while it is still dying is exactly what
+  ; breaks an update halfway through.
   nsExec::Exec 'taskkill /IM ${APPNAME}.exe /T /F'
+  StrCpy $2 40
+  wait_gone:
+  ; find exits 0 while Koma.exe is still listed, 1 once it is gone
+  nsExec::ExecToStack 'cmd /c tasklist /FI "IMAGENAME eq ${APPNAME}.exe" /NH | find /I "${APPNAME}.exe"'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    Goto koma_gone
+  ${EndIf}
+  DetailPrint "Waiting for ${APPNAME} to close…"
+  IntOp $2 $2 - 1
+  ${If} $2 == 0
+    Goto koma_gone
+  ${EndIf}
+  Sleep 300
+  Goto wait_gone
+  koma_gone:
+  ; a beat for the OS to release the handles the app and its servers were holding
   Sleep 800
   File /r "dist\${APPNAME}-win32-x64\*.*"
 

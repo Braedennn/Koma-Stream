@@ -285,6 +285,37 @@ let update = null;       // what the card offers: { version, htmlUrl, downloadUr
 
 const updateLog = msg => { try { fs.appendFileSync(path.join(LOGS, 'updater.log'), `[${new Date().toISOString()}] ${msg}\n`); } catch { /* best-effort */ } };
 
+/* The newest release we've seen, and when we saw it. The footer's version line asks
+ * for it; the update check fills the same cache, so GitHub is hit once, not twice. */
+let latestVersion = null;
+let latestCheckedAt = 0;
+let latestFetch = null;
+
+async function fetchLatestRelease() {
+  const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Koma-Desktop' },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+/** The newest published version, fetched at most once every 10 minutes. */
+function latestRelease() {
+  if (latestVersion && Date.now() - latestCheckedAt < 10 * 60e3) return Promise.resolve(latestVersion);
+  if (!latestFetch) {
+    latestFetch = fetchLatestRelease()
+      .then(rel => {
+        const v = String(rel.tag_name || '').replace(/^v/, '');
+        if (v) { latestVersion = v; latestCheckedAt = Date.now(); }
+        return latestVersion;
+      })
+      .catch(err => { updateLog(`latest check failed: ${err.message}`); return latestVersion; })
+      .finally(() => { latestFetch = null; });
+  }
+  return latestFetch;
+}
+
 // The card and notes-modal styles, kept here so the injected script stays readable.
 const CARD_CSS = '#koma-update{position:fixed;right:22px;bottom:22px;z-index:95;display:flex;gap:13px;align-items:center;padding:16px 18px;border-radius:14px;'
   + 'background:rgba(13,14,22,.86);border:1px solid rgba(255,255,255,.12);box-shadow:0 24px 60px -16px rgba(0,0,0,.9);'
@@ -439,13 +470,10 @@ function cardProgress(pct) {
 async function checkForUpdates() {
   if (!BUNDLED || updateShown) return;
   try {
-    const r = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Koma-Desktop' },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!r.ok) { updateLog(`check failed: HTTP ${r.status}`); return; }
-    const rel = await r.json();
+    const rel = await fetchLatestRelease();
     const remote = String(rel.tag_name || '').replace(/^v/, '');
+    latestVersion = remote || latestVersion;
+    latestCheckedAt = Date.now();
     const asset = (rel.assets || []).find(x => x.name === 'Koma-Setup.exe');
     if (!(remote && asset && newerVersion(remote, app.getVersion()))) { updateLog(`up to date (v${app.getVersion()})`); return; }
     updateShown = true;
@@ -481,18 +509,36 @@ async function checkForUpdates() {
 }
 
 /** The one destructive step — running the installer — happens only here, and only
- *  because the user clicked "Update now" in the card. The installer's own NSIS script
- *  stops Koma and restarts the upgraded build. */
+ *  because the user clicked "Update now" in the card. */
 ipcMain.handle('koma:update:apply', () => {
   try { fs.statSync(SETUP); } catch { return { ok: false }; }
   updateLog('consent given — opening the installer');
   try {
-    install(SETUP, { log: updateLog, quitAfter: () => app.quit() });
+    // The installer overwrites the very files this app is running from, so Koma
+    // leaves the stage the moment it hands over: servers stopped, window closed,
+    // process gone. A Koma still holding those files is what makes an update
+    // crash halfway through the copy.
+    install(SETUP, { log: updateLog, quitAfter: () => { updateLog('closing Koma for the installer'); stopServers(); app.quit(); } });
     return { ok: true };
   } catch (err) {
     updateLog(`could not open the installer: ${err.message}`);
     return { ok: false };
   }
+});
+
+/** What the footer's version line asks for: the running build, the newest release,
+ *  and whether this build is behind it. */
+ipcMain.handle('koma:version', async () => {
+  const current = app.getVersion();
+  const latest = await latestRelease();
+  return { current, latest, outdated: latest ? newerVersion(latest, current) : null };
+});
+
+/** "Update" in the footer: bring the update card back even if it was dismissed. */
+ipcMain.handle('koma:update:check', async () => {
+  updateShown = false;
+  await checkForUpdates();
+  return { shown: updateShown };
 });
 
 /* ---------- app lifecycle ---------- */

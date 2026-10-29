@@ -78,14 +78,16 @@ async function download(url, { dir, log, onPct = () => {} }) {
 
 const dropAll = p => { try { fs.unlinkSync(p); } catch { /* fine */ } };
 
-/** Hand over: open the installer and quit this app a moment later — the NSIS script
- *  stops Koma itself and restarts the upgraded build. Deliberately dumb and separate
- *  from download: nothing here runs until the user's explicit "Update now" click. */
+/** Hand over: open the installer and leave the stage AT ONCE. The installer
+ *  overwrites the very files this app is running from, so anything still open when
+ *  it starts copying is what makes an update die halfway. Deliberately dumb and
+ *  separate from download: nothing here runs until the user's explicit "Update now"
+ *  click. */
 function install(exePath, { quitAfter, spawnImpl, log = () => {} }) {
   log('opening the installer…');
   const sp = spawnImpl || ((cmd, args, opts) => cp.spawn(cmd, args, opts));
   sp(exePath, [], { detached: true, stdio: 'ignore' }).unref();
-  if (quitAfter) setTimeout(quitAfter, 2500); // give the installer a moment, then leave the stage
+  if (quitAfter) setImmediate(quitAfter); // the app goes now — not in a couple of seconds
   return exePath;
 }
 

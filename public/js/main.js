@@ -13,6 +13,7 @@ import { notFound } from './views/notfound.js';
 import { initAudioBadges } from './streaming.js';
 import { initNotifications } from './notify.js';
 import { initPresence, presenceForRoute, setActivity } from './presence.js';
+import { initVersion } from './version.js';
 import { account, clientId, finishLogin, initAutoSync, loginUrl, REDIRECT, setClientId, signOut, syncNow, syncPending } from './anilist.js';
 
 /* ---------- Koma stays in Koma ----------
@@ -318,3 +319,4 @@ surprise?.addEventListener('click', async () => {
 
 render();
 initPresence().catch(() => {});
+initVersion();
