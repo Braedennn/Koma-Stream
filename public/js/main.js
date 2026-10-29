@@ -1,6 +1,6 @@
 // App shell: client-side routing, header state, search suggestions, My list syncing.
 import { api } from './api.js';
-import { listIds, toggleList } from './store.js';
+import { listIds, toggleList, watchedIds } from './store.js';
 import { $, $$, esc, errorBox, icon, meta, name, pretty, score, small, syncListButton, toast } from './ui.js';
 import { home } from './views/home.js';
 import { anime } from './views/anime.js';
@@ -278,6 +278,42 @@ document.addEventListener('keydown', e => {
   if (e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
   e.preventDefault();
   input.focus();
+});
+
+/* ---------- Surprise me: one good roll you haven't seen ----------
+ * Random page of the top-rated catalog, filtered down to what's actually rollable:
+ * unseen, released, well-rated, no Hentai. Three pages deep, then it owns the miss. */
+const surprise = $('#surprise');
+let rolling = false;
+surprise?.addEventListener('click', async () => {
+  if (rolling) return;
+  rolling = true;
+  surprise.classList.add('spin');
+  try {
+    const mine = watchedIds();
+    const rollable = a => a
+      && a.status !== 'NOT_YET_RELEASED'
+      && (a.averageScore || 0) >= 72
+      && !(a.genres || []).includes('Hentai')
+      && !mine.has(a.id);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const page = 1 + (Math.random() * 8 | 0); // top 8 score-sorted pages: good, never fame-only
+      const { media } = await api(`/browse?sort=SCORE_DESC&page=${page}`);
+      const good = media.filter(rollable);
+      if (good.length) {
+        const a = good[Math.random() * good.length | 0];
+        toast(`🎲 Rolling: ${name(a)}`);
+        go(`/anime/${a.id}`);
+        return;
+      }
+    }
+    toast('No lucky roll — try again');
+  } catch (err) {
+    toast(err.message || 'The roll failed — try again');
+  } finally {
+    surprise.classList.remove('spin');
+    rolling = false;
+  }
 });
 
 render();

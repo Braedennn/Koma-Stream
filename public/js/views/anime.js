@@ -1,5 +1,5 @@
 import { api, airingSchedule, sourceEpisodes, seasonChain, watchOrder } from '../api.js';
-import { watchedSet } from '../store.js';
+import { addRewatch, setNote, setScore, setTags, take, watchedSet } from '../store.js';
 import { presenceAnime, setActivity } from '../presence.js';
 import {
   $, $$, big, card, episodeIndex, esc, fuzzyDate, icon, img, initSelect, listBtn, name, plain, pretty, score,
@@ -28,6 +28,7 @@ export async function anime(root, { params: [id], query, alive }) {
   const rel = (a.relations?.edges || []).filter(e => e.node);
   const recs = (a.recommendations?.nodes || []).map(n => n.mediaRecommendation).filter(Boolean);
   const startable = a.status !== 'NOT_YET_RELEASED';
+  const sc = take(a.id); // your private score/rewatch/note/tags, rendered into the panel below
   const linked = (rel || []).some(e => (e.relationType === 'PREQUEL' || e.relationType === 'SEQUEL') && e.node?.type === 'ANIME');
   const tabs = [
     ['overview', 'Overview'],
@@ -64,6 +65,30 @@ export async function anime(root, { params: [id], query, alive }) {
             ${listBtn(a.id)}
             ${yt ? `<button class="btn btn-ghost" type="button" data-trailer>${icon('film')}Trailer</button>` : ''}
           </div>
+          <div class="take" id="take">
+            <div class="take-head"><h2 class="section-title">My take<span>private to this device</span></h2><span class="take-flash" aria-live="polite"></span></div>
+            <div class="take-row">
+              <span class="take-label">Score</span>
+              <div class="stars" role="radiogroup" aria-label="Your score, 1 to 10">${starsHTML(sc.score)}</div>
+              <b class="take-val">${sc.score ? `${sc.score}/10` : ''}</b>
+            </div>
+            <div class="take-row">
+              <span class="take-label">Rewatches</span>
+              <div class="stepper" role="group" aria-label="Rewatch count">
+                <button type="button" data-rew="-1" aria-label="One rewatch fewer">−</button>
+                <b data-rew-n>${sc.rewatch}</b>
+                <button type="button" data-rew="1" aria-label="One rewatch more">+</button>
+              </div>
+            </div>
+            <div class="take-row">
+              <span class="take-label">Tags</span>
+              <div class="tagrow">
+                ${sc.tags.map(tagChip).join('')}
+                <input class="tag-input" maxlength="24" placeholder="add tag" aria-label="Add a tag">
+              </div>
+            </div>
+            <textarea class="take-note" rows="2" maxlength="500" placeholder="A private note — what landed, where you dropped it…">${esc(sc.note)}</textarea>
+          </div>
         </div>
       </div>
     </section>
@@ -95,6 +120,7 @@ export async function anime(root, { params: [id], query, alive }) {
     if (b && b.dataset.tab !== tab) show(b.dataset.tab);
   });
   $('[data-trailer]', root)?.addEventListener('click', () => show('overview', { scroll: true, play: true }));
+  initTake(root, a);
   show(tab);
 
   // The watch order needs its own walk, so it fills the tab count in later — or drops the tab
@@ -115,6 +141,91 @@ export async function anime(root, { params: [id], query, alive }) {
 function trailer(id, title) {
   return `<div class="video"><button class="video-cover" type="button" data-yt="${esc(id)}" aria-label="Play the ${esc(title)} trailer">
     <img src="https://i.ytimg.com/vi/${esc(id)}/hqdefault.jpg" alt="" loading="lazy"><span class="big-play">${icon('play')}</span></button></div>`;
+}
+
+const starsHTML = on => Array.from({ length: 10 }, (_, i) =>
+  `<button type="button" class="star${i < on ? ' on' : ''}" data-star="${i + 1}" aria-label="${i + 1} of 10">${icon('star')}</button>`).join('');
+
+const tagChip = tag => `<span class="tagchip">${esc(tag)}<button type="button" data-untag="${esc(tag)}" aria-label="Remove ${esc(tag)}">${icon('x')}</button></span>`;
+
+/* My take: score, rewatches, tags, note — every touch saves to the store and pings
+ * the "saved" flash, so nothing ever feels like it's waiting for a submit button. */
+function initTake(root, a) {
+  const box = $('#take', root);
+  if (!box) return;
+  let cur = take(a.id);
+  const flash = $('.take-flash', box);
+  let ft;
+  const ping = () => {
+    flash.textContent = 'saved';
+    flash.classList.add('in');
+    clearTimeout(ft);
+    ft = setTimeout(() => flash.classList.remove('in'), 1200);
+  };
+
+  $('.stars', box).addEventListener('click', e => {
+    const b = e.target.closest('.star');
+    if (!b) return;
+    const n = Number(b.dataset.star);
+    setScore(a.id, n === cur.score ? 0 : n); // clicking your current star clears it
+    cur = take(a.id);
+    $('.stars', box).innerHTML = starsHTML(cur.score);
+    $('.take-val', box).textContent = cur.score ? `${cur.score}/10` : '';
+    ping();
+  });
+
+  $('.stepper', box).addEventListener('click', e => {
+    const b = e.target.closest('[data-rew]');
+    if (!b) return;
+    addRewatch(a.id, Number(b.dataset.rew));
+    cur = take(a.id);
+    $('[data-rew-n]', box).textContent = cur.rewatch;
+    ping();
+  });
+
+  const tagrow = $('.tagrow', box);
+  const paintTags = () => {
+    for (const c of tagrow.querySelectorAll('.tagchip')) c.remove();
+    $('.tag-input', box).insertAdjacentHTML('beforebegin', cur.tags.map(tagChip).join(''));
+  };
+  tagrow.addEventListener('click', e => {
+    const b = e.target.closest('[data-untag]');
+    if (!b) return;
+    setTags(a.id, cur.tags.filter(t => t !== b.dataset.untag));
+    cur = take(a.id);
+    paintTags();
+    ping();
+  });
+  $('.tag-input', box).addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const tag = e.target.value.trim().replace(/\s+/g, ' ');
+    if (!tag || cur.tags.some(t => t.toLowerCase() === tag.toLowerCase()) || cur.tags.length >= 8) return;
+    setTags(a.id, [...cur.tags, tag]);
+    cur = take(a.id);
+    e.target.value = '';
+    paintTags();
+    ping();
+  });
+
+  const noteEl = $('.take-note', box);
+  let nt;
+  noteEl.addEventListener('input', () => { // debounced: a save per pause, not per keystroke
+    clearTimeout(nt);
+    nt = setTimeout(() => {
+      setNote(a.id, noteEl.value.trim());
+      cur = take(a.id);
+      ping();
+    }, 600);
+  });
+  noteEl.addEventListener('blur', () => { // a quick tab-out saves rather than loses
+    clearTimeout(nt);
+    if (noteEl.value.trim() !== cur.note) {
+      setNote(a.id, noteEl.value.trim());
+      cur = take(a.id);
+      ping();
+    }
+  });
 }
 
 function overview(panel, a) {

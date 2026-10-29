@@ -899,3 +899,57 @@ span.check[aria-pressed="true"]:hover { background: var(--good); border-color: v
 .badge-grid .badge.got .b-i { background: var(--grad); color: #fff; box-shadow: 0 6px 18px -8px var(--accent-glow); }
 .badge-grid .badge.got em { font-style: normal; font-size: 11.5px; font-weight: 700; color: var(--text-2); }
 .st-mute { color: var(--text-3); }
+
+/* ---------- v1.4.0: surprise die, my take, my takes ---------- */
+#surprise { margin-left: -12px; }
+#surprise .i { width: 17px; height: 17px; }
+#surprise.spin .i { animation: dice-roll .7s cubic-bezier(.34, 1.2, .5, 1); }
+@keyframes dice-roll {
+  0% { transform: rotate(0) scale(1); }
+  40% { transform: rotate(160deg) scale(.82); }
+  70% { transform: rotate(320deg) scale(1.08); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+.take { margin-top: 16px; display: grid; gap: 12px; padding: 15px 18px 14px; border-radius: var(--r-lg); background: var(--bg-2); border: 1px solid var(--line-2); max-width: 560px; }
+.take-head { display: flex; align-items: baseline; gap: 10px; }
+.take-head .section-title { margin: 0; }
+.take-flash { margin-left: auto; font-size: 11.5px; font-weight: 800; color: #7ef0b2; opacity: 0; transition: opacity .45s; }
+.take-flash.in { opacity: 1; transition: none; }
+.take-row { display: flex; align-items: center; gap: 12px; }
+.take-label { width: 76px; flex: none; font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.stars { display: flex; gap: 2px; }
+.stars .star { width: 25px; height: 25px; padding: 0; border: 0; background: none; cursor: pointer; display: grid; place-items: center; color: var(--text-3); transition: color .12s, transform .15s var(--spring); -webkit-tap-highlight-color: transparent; }
+.stars .star .i { width: 17px; height: 17px; }
+.stars .star:hover { transform: scale(1.22); }
+.stars .star.on { color: #FFC94D; }
+.take-val { min-width: 40px; font-size: 13px; font-weight: 800; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--line-2); border-radius: 999px; background: var(--bg-3); }
+.stepper button { width: 28px; height: 28px; padding: 0; border: 0; background: none; color: var(--text-2); font: 700 15px/1 var(--font); cursor: pointer; border-radius: 999px; -webkit-tap-highlight-color: transparent; }
+.stepper button:hover { color: #fff; background: rgba(255, 255, 255, .08); }
+.stepper b { min-width: 24px; text-align: center; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.tagrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 30px; }
+.tagchip { display: inline-flex; align-items: center; gap: 3px; padding: 3px 4px 3px 10px; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--line-2); font-size: 12px; font-weight: 650; }
+.tagchip button { width: 16px; height: 16px; padding: 0; border: 0; background: none; color: var(--text-3); cursor: pointer; display: grid; place-items: center; border-radius: 999px; -webkit-tap-highlight-color: transparent; }
+.tagchip button .i { width: 10px; height: 10px; }
+.tagchip button:hover { color: #fff; background: rgba(255, 255, 255, .12); }
+.tag-input { width: 74px; border: 0; background: none; outline: none; color: var(--text); font: 600 12.5px var(--font); padding: 5px 2px; }
+.tag-input::placeholder { color: var(--text-3); }
+.take-note { width: 100%; resize: vertical; min-height: 52px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-3); color: var(--text); outline: none; font: 500 13px/1.55 var(--font); }
+.take-note:focus { border-color: rgba(167, 139, 255, .55); }
+.take-note::placeholder { color: var(--text-3); }
+
+.take-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.take-stat { padding: 13px 16px; border-radius: var(--r-lg); background: var(--bg-2); border: 1px solid var(--line-2); }
+.take-stat b { display: block; font-size: 24px; font-weight: 800; line-height: 1.15; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.take-stat span { color: var(--text-3); font-size: 12px; font-weight: 600; }
+.tk-list { display: flex; flex-direction: column; gap: 8px; max-width: 620px; }
+.tk-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 9px 14px; border-radius: 12px; background: var(--bg-2); border: 1px solid var(--line-2); text-decoration: none; transition: border-color .16s var(--ease); }
+.tk-row:hover { border-color: rgba(167, 139, 255, .4); }
+.tk-row span { color: var(--text-2); font-size: 13px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tk-row b { flex: none; display: inline-flex; align-items: center; gap: 4px; color: #FFC94D; font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.tk-row b .i { width: 13px; height: 13px; }
+.tk-row b small { color: var(--text-3); font-size: 11px; font-weight: 700; }
+.tk-rew { color: var(--text-2); font-size: 13px; margin: 12px 0 0; }
+.tk-rew a { color: var(--text); font-weight: 700; text-decoration: none; border-bottom: 1px solid var(--line-2); }
+.tk-rew a:hover { border-color: rgba(167, 139, 255, .55); }

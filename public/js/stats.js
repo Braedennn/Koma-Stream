@@ -139,3 +139,28 @@ export function computeStats(events = [], meta = {}, { dayOf: onDay = dayOf, now
     badgeState,
   };
 }
+
+/** Personal takes (store.js's scores and rewatch counters) → the Stats page's
+ *  "My takes" panel. Pure like computeStats: takesById() in, plain numbers out.
+ *  A score of 0 means "not rated"; untouched takes count nowhere. */
+export function takeStats(takes) {
+  const rated = [];
+  let rewatches = 0;
+  let top = null;
+  for (const [key, t] of Object.entries(takes || {})) {
+    const id = Number(key);
+    if (t.score > 0) rated.push({ id, score: t.score });
+    if (t.rewatch > 0) {
+      rewatches += t.rewatch;
+      if (!top || t.rewatch > top.n) top = { id, n: t.rewatch };
+    }
+  }
+  const avg = rated.length ? rated.reduce((s, r) => s + r.score, 0) / rated.length : 0;
+  return {
+    rated: rated.length,
+    avg: Math.round(avg * 10) / 10,
+    rewatches,
+    topRewatch: top,
+    best: rated.slice().sort((a, b) => b.score - a.score || a.id - b.id),
+  };
+}

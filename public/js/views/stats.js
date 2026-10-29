@@ -1,6 +1,6 @@
 import { mediaByIds } from '../api.js';
-import { readJournal } from '../store.js';
-import { computeStats } from '../stats.js';
+import { readJournal, takesById } from '../store.js';
+import { computeStats, takeStats } from '../stats.js';
 import { esc, icon, setTitle } from '../ui.js';
 
 const DAY = 86400e3;
@@ -14,14 +14,18 @@ export async function stats(root, { alive }) {
     <div class="stack"><div class="sk" style="height:118px"></div><div class="sk" style="height:200px"></div></div>`;
 
   const journal = readJournal();
+  const takeMap = takesById();
+  const ts = takeStats(takeMap);
   if (!alive()) return;
 
-  // Hydrate what the journal references (genres, format). The server only knows some
-  // AniList ids; partial metadata just trims the genre spread — nothing else needs it.
+  // Hydrate what the journal and takes reference (genres, format, names). The server
+  // only knows some AniList ids; partial metadata just trims the genre spread — nothing else needs it.
   const meta = {};
-  const ids = [...new Set(journal.map(e => e.id))];
+  let media = [];
+  const ids = [...new Set([...journal.map(e => e.id), ...Object.keys(takeMap).map(Number)])];
   if (ids.length) {
-    for (const m of (await mediaByIds(ids).catch(() => []) || [])) meta[m.id] = { genres: m.genres || [], format: m.format };
+    media = await mediaByIds(ids).catch(() => []) || [];
+    for (const m of media) meta[m.id] = { genres: m.genres || [], format: m.format };
   }
   const s = computeStats(journal, meta);
   if (!alive()) return;
@@ -58,6 +62,20 @@ export async function stats(root, { alive }) {
     cells.push(`<span class="hm hm${n > 4 ? 4 : n}" style="grid-row:${(d.getDay() + 6) % 7 + 1};grid-column:${((pad + i) / 7 | 0) + 1}" title="${keyOf(d)}: ${n} episode${n === 1 ? '' : 's'}"></span>`);
   }
 
+  // "My takes" — your private scores and rewatch counters. Only rendered once
+  // there's something in them; an untouched panel would just be nagging.
+  const nameOf = id => { const m = media.find(x => x.id === id); return m ? (m.title.english || m.title.romaji) : `#${id}`; };
+  const takeSection = (ts.rated || ts.rewatches) ? `<section><h2 class="section-title">My takes<span>your own ratings, private to this device</span></h2>
+    <div class="take-grid">
+      <div class="take-stat"><b>${ts.rated ? ts.avg.toFixed(1) : '—'}</b><span>average of your scores</span></div>
+      <div class="take-stat"><b>${ts.rated}</b><span>show${ts.rated === 1 ? '' : 's'} rated</span></div>
+      <div class="take-stat"><b>${ts.rewatches}</b><span>rewatch${ts.rewatches === 1 ? '' : 'es'} logged</span></div>
+    </div>
+    ${ts.best.length ? `<div class="tk-list">${ts.best.slice(0, 6).map(r => `
+      <a class="tk-row" href="/anime/${r.id}"><span>${esc(nameOf(r.id))}</span><b>${icon('star')}${r.score}<small>/10</small></b></a>`).join('')}</div>` : ''}
+    ${ts.topRewatch ? `<p class="tk-rew">Most rewatched: <a href="/anime/${ts.topRewatch.id}">${esc(nameOf(ts.topRewatch.id))}</a> — ${ts.topRewatch.n}×</p>` : ''}
+  </section>` : '';
+
   root.innerHTML = `
     <div class="page-head"><h1>Your stats</h1>
       <p class="sub">Everything here is logged on this device — finished episodes only, so the numbers are honest.</p></div>
@@ -74,6 +92,8 @@ export async function stats(root, { alive }) {
           <div class="gb-row"><span>${esc(g)}</span><i style="width:${Math.round(n / s.topGenres[0][1] * 100)}%"></i><b>${n}</b>${i === 0 ? '<em>top</em>' : ''}</div>`).join('')}</div>`
           : '<p class="st-mute">Genre data isn\'t available for your shows right now.</p>'}
       </section>
+
+      ${takeSection}
 
       <section><h2 class="section-title">Badges<span>${s.badgeState.filter(b => b.unlocked).length} of ${s.badgeState.length} earned</span></h2>
         <div class="badge-grid">${s.badgeState.map(b => b.unlocked
