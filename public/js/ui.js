@@ -91,9 +91,11 @@ const posterSet = a => (a.coverImage?.large && a.coverImage?.extraLarge
   ? ` srcset="${esc(a.coverImage.large)} 230w, ${esc(a.coverImage.extraLarge)} 460w" sizes="(max-width: 560px) 45vw, (max-width: 1150px) 22vw, 15vw"`
   : '');
 
-export function card(a, { progress = false, note = '' } = {}) {
+export function card(a, { progress = false, note = '', seen: seenIn = null } = {}) {
   const href = progress ? `/watch/${a.id}` : `/anime/${a.id}`;
-  const seen = progress ? watchedSet(a.id).size : 0;
+  // `seen` lets a caller state how many episodes *this* view counts — the continue
+  // watching rail knows what you watched here, which is not always everything marked.
+  const seen = progress ? (Number.isFinite(seenIn) ? seenIn : watchedSet(a.id).size) : 0;
   const total = a.episodes || airedCount(a);
   const s = score(a);
   const line = note || (progress ? `Episode ${seen + 1} next${total ? ` of ${total}` : ''}` : meta(a.seasonYear, eps(a)));

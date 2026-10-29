@@ -43,7 +43,10 @@ const SECURITY = {
   'X-Frame-Options': 'SAMEORIGIN',
     'Content-Security-Policy': [
       "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "font-src https://fonts.gstatic.com", "img-src 'self' data: https:", "connect-src 'self' https://graphql.anilist.co",
+      "font-src https://fonts.gstatic.com", "img-src 'self' data: https:",
+      // api.github.com is the release feed the footer's version line reads in a
+      // plain browser tab (inside the app the shell asks GitHub itself).
+      "connect-src 'self' https://graphql.anilist.co https://api.github.com",
       "media-src 'self' blob:", "worker-src 'self' blob:", 'frame-src https:', "base-uri 'self'", "form-action 'self'",
     ].join('; '),
 };

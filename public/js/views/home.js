@@ -1,5 +1,6 @@
 import { api, mediaByIds } from '../api.js';
-import { listIds, readJournal, watchedIds, watchedSet } from '../store.js';
+import { readJournal, readProgress, watchedIds, watchedMap } from '../store.js';
+import { continueWatching, watchedShows } from '../continuing.js';
 import { genreWeights, rankCandidates, topGenres } from '../taste.js';
 import { $, airedCount, cap, card, genreTile, hero, initHero, initRails, rankCard, row, setTitle, skRow } from '../ui.js';
 
@@ -34,33 +35,42 @@ export async function home(root, { alive }) {
 
   initHero($('.hero', root));
   initRails(root);
-  continueWatching($('#continue', root), alive);
+  continueRail($('#continue', root), alive);
   forYou($('#foryou', root), alive);
 }
 
-async function continueWatching(slot, alive) {
-  let saved = {};
-  try { saved = JSON.parse(localStorage.getItem('koma.progress') || '{}'); } catch { /* none */ }
-  // Shows with a watched episode, plus anything you're partway through (even on episode 1).
-  const started = Object.entries(saved).sort((x, y) => (y[1].at || 0) - (x[1].at || 0)).map(([id]) => Number(id));
-  const ids = [...new Set([...started, ...listIds().filter(id => watchedSet(id).size)])].filter(Number.isInteger).slice(0, 30);
+/* "Continue watching" — what you actually watch, in Koma. The evidence is local:
+ * episodes you finished here (the journal) and the episode you are in the middle of
+ * (the resume point). A show that is only on your list — an AniList watchlist entry
+ * especially — is not something you are watching, so it never shows up here. */
+async function continueRail(slot, alive) {
+  const journal = readJournal();
+  const progress = readProgress();
+  const ids = watchedShows({ journal, progress });
   if (!ids.length) return;
-  try {
-    const media = await mediaByIds(ids);
-    const left = media.filter(a => saved[a.id] || watchedSet(a.id).size < (airedCount(a) || Infinity));
-    if (!alive() || !left.length) return;
-    slot.insertAdjacentHTML('afterend', row({
-      title: 'Continue watching', sub: 'Pick up where you left off.', link: '/list',
-      body: left.map(a => {
-        const p = saved[a.id];
-        const note = p && Number.isFinite(p.dur) && p.dur - p.t > 30 ? `${Math.max(1, Math.round((p.dur - p.t) / 60))} min left` : '';
-        return card(a, { progress: true, note });
-      }).join(''),
-    }));
-    const section = slot.nextElementSibling;
-    slot.remove();
-    initRails(section);
-  } catch { /* optional row; the rest of the page still works */ }
+  let media;
+  try { media = await mediaByIds(ids); } catch { return; }
+  if (!alive()) return;
+  const aired = Object.fromEntries(media.map(a => [a.id, airedCount(a)]));
+  const entries = continueWatching({ journal, progress, watched: watchedMap(), aired });
+  if (!entries.length) return;
+  const byId = new Map(media.map(a => [a.id, a]));
+  slot.insertAdjacentHTML('afterend', row({
+    title: 'Continue watching',
+    sub: 'Only what you actually watch here — watchlist additions stay out.',
+    link: '/list',
+    body: entries.map(e => {
+      const a = byId.get(e.id);
+      if (!a) return '';
+      const note = e.kind === 'mid'
+        ? `Episode ${e.ep}${e.left ? ` · ${e.left} min left` : ''}`
+        : `Episode ${e.ep} next`;
+      return card(a, { progress: true, note, seen: e.watched });
+    }).join(''),
+  }));
+  const section = slot.nextElementSibling;
+  slot.remove();
+  initRails(section);
 }
 
 /* "For you" — the local taste model. Journal events become genre weights, the two

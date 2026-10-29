@@ -2,15 +2,11 @@
 // Episode and audio changes swap the stream in place — the player element is
 // never torn down between episodes, so fullscreen and playback carry over.
 import { api, airingSchedule, sourceEpisodes } from '../api.js';
-import { addToList, setWatched, watchedSet, journalEpisode } from '../store.js';
+import { addToList, readProgress, setWatched, watchedSet, writeProgress, journalEpisode } from '../store.js';
 import { $, $$, big, card, episodeIndex, esc, icon, img, initRails, listBtn, name, plain, row, setTitle, toast, when, ytId } from '../ui.js';
 import { Player, ensureHls, getPref, setPref } from '../player.js';
 import { streamWatch, getAudioPref, setAudioPref, initAudioBadges, audioCounts } from '../streaming.js';
 import { presencePaused, presenceProgress, presenceResumed, presenceSeek, presenceStopped, presenceWatching } from '../presence.js';
-
-const PKEY = 'koma.progress';
-const readProgress = () => { try { return JSON.parse(localStorage.getItem(PKEY) || '{}'); } catch { return {}; } };
-const writeProgress = (id, slot) => { const all = readProgress(); if (slot) all[id] = slot; else delete all[id]; try { localStorage.setItem(PKEY, JSON.stringify(all)); } catch { /* full */ } };
 
 export async function watch(root, { params: [id], query, alive }) {
   root.innerHTML = `<div class="watch"><div class="watch-grid">

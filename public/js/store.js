@@ -24,6 +24,22 @@ addEventListener('storage', e => {
 export const inList = id => state.list.includes(id);
 export const listIds = () => [...state.list];
 export const watchedSet = id => new Set(state.watched[id] || []);
+/** Every show's watched episodes, as { id: [eps] }. A copy — callers never touch the store. */
+export const watchedMap = () => Object.fromEntries(Object.entries(state.watched).map(([id, eps]) => [id, [...eps]]));
+
+/* ---------- resume points ---------- *
+ * One entry per show you are in the middle of: which episode, how far in, and when.
+ * The watch page writes it while the video plays; Home and My list read it to know
+ * what you can pick up right now. Separate key again, so it never shifts the shape
+ * of the list/progress data. */
+const PKEY = 'koma.progress';
+
+export const readProgress = () => { try { return JSON.parse(localStorage.getItem(PKEY) || '{}'); } catch { return {}; } };
+export const writeProgress = (id, slot) => {
+  const all = readProgress();
+  if (slot) all[id] = slot; else delete all[id];
+  try { localStorage.setItem(PKEY, JSON.stringify(all)); } catch { /* full */ }
+};
 
 export function toggleList(id) {
   state.list = inList(id) ? state.list.filter(x => x !== id) : [id, ...state.list];
