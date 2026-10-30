@@ -26,7 +26,8 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 
 **The player**
 - Custom-built on hls.js — plays **Japanese sub and English dub** where available, with a one-click toggle that remembers your preference
-- **The right episode, every time** — a show split into cours is several entries, and the sites name the parts their own way ("Cour 2", "Part II", "2nd Season – Part II"). Koma works out which entry really holds the part you asked for before it plays, so the second cour of a season plays the second cour — and a site that keeps a whole season in one entry is counted correctly
+- **English is English, Japanese is Japanese** — a dub playlist can carry Hindi, English and Japanese side by side, and the sites mark the first one as the default, so the player used to take Hindi for an English dub. Koma reads the playlist, plays the track you asked for, and passes a stream over when it has no audio in that language at all
+- **The right episode, every time** — a show split into cours is several entries, and the sites name the parts their own way ("Cour 2", "Part II", "2nd Season – Part II"). Koma works out which entry really holds the part you asked for before it plays, so the second cour of a season plays the second cour — and a site that keeps a whole season in one entry is counted correctly, using the episode database's own titles where a site's list says nothing ("Episode 12")
 - Auto-skip intro/outro when the source provides timestamps, autoplay next episode with a cancelable countdown, resume where you left off
 - Quality, speed, and subtitle menus; picture-in-picture; fullscreen; full keyboard shortcuts (space/K, J/L, arrows, F, M, N, C)
 
