@@ -105,7 +105,7 @@ async function resolveSiteIds(anilistId?: string, malId?: string): Promise<SiteI
   return null;
 }
 
-async function fetchEpisodes(source: Source, siteIds: any, overrides: { heavenId?: string } = {}): Promise<{ episodes: any[]; siteId: string; error?: string }> {
+async function fetchEpisodes(source: Source, siteIds: any, overrides: { heavenId?: string; anikotoId?: string; desidubId?: string } = {}): Promise<{ episodes: any[]; siteId: string; error?: string }> {
   const zoroId = siteIds.siteIds?.zoro as string | undefined;
   const heavenId = overrides.heavenId || (siteIds.siteIds?.animeheaven as string | undefined);
 
@@ -114,12 +114,14 @@ async function fetchEpisodes(source: Source, siteIds: any, overrides: { heavenId
     return { episodes: await getHeavenEpisodes(heavenId), siteId: heavenId };
   }
   if (source === 'anikoto') {
-    const slug = siteIds.siteIds?.anikoto as string | undefined;
+    // Anikoto names its entries its own way ("Rocky Joe 2" for "Tomorrow's Joe
+    // 2"), so the caller can point at the entry it knows holds the part.
+    const slug = overrides.anikotoId || (siteIds.siteIds?.anikoto as string | undefined);
     if (!slug) return { episodes: [], siteId: '', error: 'Not indexed on Anikoto' };
     return { episodes: await getAnikotoEpisodes(slug), siteId: slug };
   }
   if (source === 'desidub') {
-    const slug = siteIds.siteIds?.desidub as string | undefined;
+    const slug = overrides.desidubId || (siteIds.siteIds?.desidub as string | undefined);
     if (!slug) return { episodes: [], siteId: '', error: 'Not indexed on DesiDub' };
     return { episodes: await getDesidubEpisodes(slug), siteId: slug };
   }
@@ -182,7 +184,7 @@ router.get('/info', async (req: Request, res: Response) => {
 // confused with the singular /episode route further down, which is the
 // MAL-metadata + thumbnail combined lookup.
 router.get('/episodes', async (req: Request, res: Response) => {
-  const { anilistId, malId, source = 'anikoto', heavenId } = req.query;
+  const { anilistId, malId, source = 'anikoto', heavenId, anikotoId, desidubId } = req.query;
   if (!anilistId && !malId && !(source === 'animeheaven' && heavenId)) return res.status(400).json({ error: 'Provide ?anilistId= or ?malId=, or ?heavenId= for AnimeHeaven' });
   if (!SOURCES.includes(source as Source)) return res.status(400).json({ error: `source must be: ${SOURCES.join(', ')}` });
   try {
@@ -193,7 +195,11 @@ router.get('/episodes', async (req: Request, res: Response) => {
 
     const siteIds = await resolveSiteIds(anilistId as string, malId as string);
     if (!siteIds) return res.status(404).json({ error: 'Could not resolve site IDs' });
-    const result = await fetchEpisodes(source as Source, siteIds, { heavenId: heavenId ? String(heavenId) : undefined });
+    const result = await fetchEpisodes(source as Source, siteIds, {
+      heavenId: heavenId ? String(heavenId) : undefined,
+      anikotoId: anikotoId ? String(anikotoId) : undefined,
+      desidubId: desidubId ? String(desidubId) : undefined,
+    });
     if (result.error) return res.status(404).json({ error: result.error });
     return res.json({ anilistId: siteIds.anilistId, malId: siteIds.malId, title: siteIds.title, source, siteId: result.siteId, count: result.episodes.length, episodes: result.episodes });
   } catch (e) {
@@ -202,7 +208,7 @@ router.get('/episodes', async (req: Request, res: Response) => {
 });
 
 router.get('/servers', async (req: Request, res: Response) => {
-  const { anilistId, malId, ep, type = 'sub', source = 'anikoto', heavenId } = req.query;
+  const { anilistId, malId, ep, type = 'sub', source = 'anikoto', heavenId, anikotoId, desidubId } = req.query;
   if (!ep) return res.status(400).json({ error: 'Missing ?ep=' });
   if (!anilistId && !malId && !(source === 'animeheaven' && heavenId)) return res.status(400).json({ error: 'Provide ?anilistId= or ?malId=, or ?heavenId= for AnimeHeaven' });
   const epNum = parseInt(ep as string);
@@ -215,7 +221,11 @@ router.get('/servers', async (req: Request, res: Response) => {
       : await resolveSiteIds(anilistId as string, malId as string);
     if (!siteIds) return res.status(404).json({ error: 'Could not resolve site IDs' });
 
-    const epResult = await fetchEpisodes(source as Source, siteIds, { heavenId: heavenId ? String(heavenId) : undefined });
+    const epResult = await fetchEpisodes(source as Source, siteIds, {
+      heavenId: heavenId ? String(heavenId) : undefined,
+      anikotoId: anikotoId ? String(anikotoId) : undefined,
+      desidubId: desidubId ? String(desidubId) : undefined,
+    });
     if (epResult.error) return res.status(404).json({ error: epResult.error });
     const episode = epResult.episodes.find((e: any) => Math.round(e.num) === epNum);
     if (!episode) return res.status(404).json({ error: `Episode ${epNum} not found` });
@@ -245,6 +255,8 @@ async function watchHandler(req: Request, res: Response) {
   const { source, id, ep, type } = req.params;
   const preferredServer = req.query.server as string | undefined;
   const heavenOverride = req.query.heavenId as string | undefined;
+  const anikotoOverride = req.query.anikotoId as string | undefined;
+  const desidubOverride = req.query.desidubId as string | undefined;
 
   if (!SOURCES.includes(source as Source)) return res.status(400).json({ error: `source must be: ${SOURCES.join(', ')}` });
   const epNum = parseInt(ep);
@@ -261,7 +273,11 @@ async function watchHandler(req: Request, res: Response) {
       : await resolveSiteIds(anilistId, malId);
     if (!siteIds) return res.status(404).json({ error: 'Could not resolve anime' });
 
-    const epResult = await fetchEpisodes(source as Source, siteIds, { heavenId: heavenOverride });
+    const epResult = await fetchEpisodes(source as Source, siteIds, {
+      heavenId: heavenOverride,
+      anikotoId: anikotoOverride,
+      desidubId: desidubOverride,
+    });
     if (epResult.error) return res.status(404).json({ error: epResult.error });
 
     const episode = epResult.episodes.find((e: any) => Math.round(e.num) === epNum);

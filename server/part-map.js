@@ -143,7 +143,8 @@ export function pickPart(candidates, want, count = 0) {
 
 /** The shows anikoto has for a title. */
 export async function anikotoSearch(title) {
-  const html = await get(`${ANIKOTO}/filter?keyword=${encodeURIComponent(title)}`);
+  const url = `${ANIKOTO}/filter?keyword=${encodeURIComponent(title)}`;
+  const html = await get(url);
   const out = [];
   for (const chunk of html.split('<div class="item ').slice(1)) {
     const slug = chunk.match(/\/watch\/([a-z0-9-]+)\/ep-/)?.[1];
@@ -156,16 +157,20 @@ export async function anikotoSearch(title) {
       count: Number(chunk.match(/ep-status total"><span>\s*(\d+)/)?.[1] || 0),
     });
   }
+  // An empty read is the site saying nothing, not an answer: it is not kept,
+  // or the next attempt would be told the same thing for hours.
+  if (!out.length) cache.delete(url);
   return out;
 }
 
 /** The episodes anikoto holds in one of its entries, and the MAL id of the part they belong to. */
 export async function anikotoEpisodes(animeId, slug) {
-  const json = await get(`${ANIKOTO}/ajax/episode/list/${animeId}`, {
+  const url = `${ANIKOTO}/ajax/episode/list/${animeId}`;
+  const json = await get(url, {
     headers: { 'X-Requested-With': 'XMLHttpRequest', Referer: `${ANIKOTO}/watch/${slug}` },
   });
   let html = '';
-  try { html = JSON.parse(json)?.result || ''; } catch { return []; }
+  try { html = JSON.parse(json)?.result || ''; } catch { html = ''; }
   const out = [];
   for (const chunk of html.split('<li ').slice(1)) {
     const num = Number(chunk.match(/data-num="([0-9.]+)"/)?.[1]);
@@ -176,15 +181,18 @@ export async function anikotoEpisodes(animeId, slug) {
       mal: Number(chunk.match(/data-mal="(\d*)"/)?.[1] || 0),
     });
   }
+  // An empty read is the site saying nothing, not an answer: it is not kept.
+  if (!out.length) cache.delete(url);
   return out;
 }
 
 /** The anikoto entry behind a slug: its episodes and the part they belong to. */
 export async function anikotoEntry(slug) {
   if (!slug) return null;
-  const html = await get(`${ANIKOTO}/watch/${slug}`);
+  const url = `${ANIKOTO}/watch/${slug}`;
+  const html = await get(url);
   const animeId = html.match(/id="watch-main"[^>]{0,400}?data-id="(\d+)"/)?.[1] || html.match(/data-id="(\d+)"/)?.[1];
-  if (!animeId) return null;
+  if (!animeId) { cache.delete(url); return null; }
   const episodes = await anikotoEpisodes(animeId, slug);
   if (!episodes.length) return null;
   return { slug, animeId, episodes, mal: episodes.find(e => e.mal)?.mal || 0 };

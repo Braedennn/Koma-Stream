@@ -163,13 +163,15 @@ async function ourPart(media, want, count, candidates) {
     const episodes = await anikotoEpisodes(pick.animeId, pick.slug).catch(() => []);
     if (episodes.length) {
       const mals = episodes.filter(e => e.mal).map(e => e.mal);
-      if (!mals.length || !media.idMal || mals.includes(media.idMal)) return { slug: pick.slug, episodes };
+      if (!mals.length || !media.idMal || mals.includes(media.idMal)) {
+        return { slug: pick.slug, episodes, proven: !!(media.idMal && mals.includes(media.idMal)) };
+      }
     }
   }
 
   // The title says nothing useful. Ask the site which entry holds our part.
   const hit = await findProven(list, media.idMal).catch(() => null);
-  return hit ? { slug: hit.slug, episodes: hit.episodes } : null;
+  return hit ? { slug: hit.slug, episodes: hit.episodes, proven: true } : null;
 }
 
 /**
@@ -255,7 +257,9 @@ const PLAN_TTL = 30 * 60e3;
  */
 async function buildPlan(anilistId) {
   const media = await mediaOf(anilistId).catch(() => null);
-  if (!media) return { ok: true, options: [{ source: 'anikoto', offset: 0 }], episodes: [] };
+  // The catalog could not be reached, so nothing about the part can be checked.
+  // This plan is weak: it is never kept, so the next attempt tries again.
+  if (!media) return { ok: true, weak: true, options: [{ source: 'anikoto', offset: 0 }], episodes: [] };
   const title = media.title.english || media.title.romaji || media.title.native || '';
   const want = parseTitle(title);
   const count = media.episodes || 0;
@@ -265,31 +269,47 @@ async function buildPlan(anilistId) {
   const own = entry?.siteId ? await anikotoEntry(entry.siteId).catch(() => null) : null;
 
   // The entry is this part — or the site would not say — so play it as it is.
-  if (!own || !own.mal || !media.idMal || own.mal === media.idMal) {
-    return { ok: true, options: [{ source: 'anikoto', offset: 0 }], episodes: entry?.episodes || [] };
+  if (entry?.siteId && (!own || !own.mal || !media.idMal || own.mal === media.idMal)) {
+    // The site could not be read to check the entry, or came back empty. That
+    // is a weak answer: it is not kept, so the next attempt reads the site
+    // again instead of living with it for half an hour.
+    const weak = !own || !entry.episodes?.length;
+    return { ok: true, weak, options: [{ source: 'anikoto', siteId: entry.siteId, offset: 0 }], episodes: entry?.episodes || [] };
   }
 
-  // The entry belongs to another part. Find the ones that hold ours.
+  // The entry belongs to another part — or the streaming server has no entry
+  // for this show at all. Find the ones that hold ours.
   const mine = await ourPart(media, want, count);
   // Our part's episode titles, from whoever names them the same way the sites
   // do — the site's own entry first, then the episode list the database has.
   const titles = await ourTitles(media, mine?.episodes || []);
   const options = [];
 
+  // The entry that proves it holds our part, played by name. The streaming
+  // server picks its entry by comparing titles, which is how a second cour
+  // ended up on the first one's entry; this is the entry the site itself
+  // stamps as ours, and it is handed over instead of guessed at.
+  //
+  // The entry has to hold the whole part: one that holds only some of its
+  // episodes is not this part, and playing it would leave the rest missing.
+  if (mine?.proven && (!count || mine.episodes.length === count)) {
+    options.push({ source: 'anikoto', anikotoId: mine.slug, siteId: mine.slug, offset: 0 });
+  }
+
   // The entry the streaming server found may still hold the whole season —
   // then our part starts further in.
   if (titles.length && entry?.episodes?.length) {
     const offset = matchOffset(titles, entry.episodes);
-    if (offset >= 0) options.push({ source: 'anikoto', offset });
+    if (offset >= 0) options.push({ source: 'anikoto', siteId: entry?.siteId, offset });
   }
 
   const heaven = await heavenPart(media, want, count);
-  if (heaven) options.push({ source: 'animeheaven', heavenId: heaven.id, offset: 0 });
+  if (heaven) options.push({ source: 'animeheaven', heavenId: heaven.id, siteId: heaven.id, offset: 0 });
 
   const desi = await upstreamJson('/episodes', `?anilistId=${anilistId}&source=desidub`, null, 60000).catch(() => null);
   if (titles.length && desi?.data?.episodes?.length) {
     const offset = matchOffset(titles, desi.data.episodes);
-    if (offset >= 0) options.push({ source: 'desidub', offset });
+    if (offset >= 0) options.push({ source: 'desidub', siteId: desi.data.siteId, offset });
   }
 
   if (!options.length) {
@@ -310,7 +330,9 @@ async function planFor(anilistId) {
   const hit = plans.get(anilistId);
   if (hit && Date.now() - hit.at < PLAN_TTL) return hit.plan;
   const plan = await buildPlan(anilistId).catch(err => ({ ok: false, error: err?.message || 'The streaming sources could not be checked.' }));
-  plans.set(anilistId, { at: Date.now(), plan });
+  // A plan that could not be checked is not kept: the next attempt tries again
+  // instead of living with a bad answer for half an hour.
+  if (!plan.weak) plans.set(anilistId, { at: Date.now(), plan });
   return plan;
 }
 
@@ -376,6 +398,8 @@ async function watchOn(opt, q, req, type) {
   const p = new URLSearchParams(q);
   p.set('source', opt.source);
   if (opt.heavenId) p.set('heavenId', opt.heavenId); else p.delete('heavenId');
+  if (opt.anikotoId) p.set('anikotoId', opt.anikotoId); else p.delete('anikotoId');
+  if (opt.desidubId) p.set('desidubId', opt.desidubId); else p.delete('desidubId');
   const ep = Number(p.get('ep') || 0) + (opt.offset || 0);
   if (Number.isFinite(ep)) p.set('ep', String(ep));
   const key = `${opt.source}:${type}`;
@@ -387,6 +411,13 @@ async function watchOn(opt, q, req, type) {
   if (r.status === 200 && r.data?.server && r.data?.playbackMode !== 'iframe') goodServer.set(key, r.data.server);
   else if (r.status !== 200 && remembered) goodServer.delete(key);
   if (r.status !== 200) return r;
+
+  // Which entry is playing: the one that was proven to hold this part of the
+  // show. The streaming server does not say, so it is said here.
+  if (r.data && opt.siteId && !r.data.siteId) {
+    r.data.siteId = opt.siteId;
+    r.body = JSON.stringify(r.data);
+  }
 
   // The stream has to be in the language that was asked for. One that is not
   // is passed over, the same way a missing episode is.
