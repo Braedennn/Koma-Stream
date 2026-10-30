@@ -37,6 +37,16 @@ const fmt = s => {
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` : `${m}:${String(x).padStart(2, '0')}`;
 };
 
+/** The language of an audio track, as far as the playlist says. */
+const trackLang = t => {
+  const code = String(t?.lang || '').toLowerCase().split(/[-_]/)[0];
+  if (code && code !== 'und') return code;
+  const name = String(t?.name || '').toLowerCase();
+  if (/english|ingles|anglais/.test(name)) return 'en';
+  if (/japanese|japonais|日本語/.test(name)) return 'ja';
+  return '';
+};
+
 export class Player {
   /**
    * @param container element that gets .kplayer
@@ -178,6 +188,7 @@ export class Player {
           const i = prefs.quality ? this.hls.levels.findIndex(l => l.height === prefs.quality) : -1;
           if (i >= 0) this.hls.currentLevel = i;
         } catch { /* leave default */ }
+        this.pickAudioTrack();
       });
       this.hls.on(Hls.Events.ERROR, (_, data) => this.onHlsError(data));
       this.hls.loadSource(src);
@@ -329,6 +340,22 @@ export class Player {
 
   teardownHls() {
     if (this.hls) { try { this.hls.destroy(); } catch { /* gone */ } this.hls = null; }
+  }
+
+  /**
+   * The audio track that was asked for.
+   *
+   * A dub playlist can carry Hindi, English and Japanese side by side. The
+   * server narrows the playlist down to the language that was asked for; this
+   * is the other half of that, for the playlists the server had no say over.
+   */
+  pickAudioTrack() {
+    const tracks = this.hls?.audioTracks || [];
+    if (tracks.length < 2) return;
+    const want = this.state.type === 'dub' ? 'en' : 'ja';
+    const i = tracks.findIndex(t => trackLang(t) === want);
+    if (i < 0 || i === this.hls.audioTrack) return;
+    try { this.hls.audioTrack = i; } catch { /* leave the default */ }
   }
 
   retry() {

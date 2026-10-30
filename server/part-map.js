@@ -47,6 +47,15 @@ export function parseTitle(title) {
   s = s.replace(/\bseason\s*(\d+)\b/g, (_, n) => { season = Number(n); return ' '; });
   s = s.replace(/\bpart\s*([ivx]+|\d+)\b/g, (_, n) => { part = /^\d+$/.test(n) ? Number(n) : (ROMAN[n] || null); return ' '; });
   s = s.replace(/\bcour(?:t)?\s*(\d+)\b/g, (_, n) => { part = Number(n); return ' '; });
+  // A number at the end of the name is the season: the sites write "One Punch
+  // Man 2" where the episode list says "One Punch Man Season 2". Numbers big
+  // enough to be part of the name ("Mob Psycho 100") are left alone.
+  s = s.replace(/\s(\d{1,2})$/, (_, n) => {
+    const v = Number(n);
+    if (!v || v > 20) return _;
+    season = v;
+    return ' ';
+  });
   return { series: s.replace(/[^a-z0-9]+/g, ' ').trim(), season, part };
 }
 
@@ -68,15 +77,34 @@ export function searchTitle(title) {
     .trim();
 }
 
+/** Words that say nothing about which show a title names. */
+const ARTICLES = new Set(['the', 'a', 'an']);
+
+/** A series name the way the comparison sees it: no articles, no punctuation. */
+export function seriesWords(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    .split(' ').filter(w => w && !ARTICLES.has(w)).join(' ');
+}
+
 /** Do two titles name the same series? */
 export function sameSeries(a, b) {
   if (!a || !b) return false;
-  if (a === b) return true;
-  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  const x = seriesWords(a);
+  const y = seriesWords(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
   if (short.length < 3) return false;
   // The shorter name is usually the series without its suffix ("Mushoku
   // Tensei" for "Mushoku Tensei: Jobless Reincarnation").
-  return long.startsWith(short) || (long.includes(short) && short.length / long.length >= 0.5);
+  if (long.startsWith(short)) return true;
+  if (long.includes(short) && short.length / long.length >= 0.5) return true;
+  // Or the same words with a few more in between ("Demon Slayer Movie: Mugen
+  // Train" for "Demon Slayer -Kimetsu no Yaiba- The Movie: Mugen Train").
+  const own = short.split(' ');
+  if (own.length < 2) return false;
+  const words = new Set(long.split(' '));
+  return own.every(w => words.has(w));
 }
 
 /**
@@ -106,7 +134,10 @@ export function pickPart(candidates, want, count = 0) {
   const withCount = count ? pool.filter(c => !c.count || c.count === count) : [];
   const use = withCount.length ? withCount : pool;
   const info = c => (c.parsed.season != null ? 1 : 0) + (c.parsed.part != null ? 1 : 0);
-  use.sort((a, b) => info(b) - info(a) || a.parsed.series.length - b.parsed.series.length);
+  // An entry that says exactly how many episodes our part has beats one that
+  // does not say.
+  const says = c => (count && c.count === count ? 1 : 0);
+  use.sort((a, b) => says(b) - says(a) || info(b) - info(a) || a.parsed.series.length - b.parsed.series.length);
   return use[0];
 }
 
@@ -159,6 +190,49 @@ export async function anikotoEntry(slug) {
   return { slug, animeId, episodes, mal: episodes.find(e => e.mal)?.mal || 0 };
 }
 
+/**
+ * The entries a site has for a title.
+ *
+ * The full name finds the part ("My Hero Academia Season 4"), and the series
+ * name alone finds every part of it ("My Hero Academia 2", "… 3", "… 4") —
+ * one of the two usually holds the part, and which one depends on how the
+ * site names its entries.
+ */
+export async function anikotoCandidates(title) {
+  const terms = [...new Set([String(title || '').trim(), searchTitle(title)])].filter(Boolean);
+  const lists = await Promise.all(terms.map(t => anikotoSearch(t).catch(() => [])));
+  const out = new Map();
+  for (const list of lists) for (const c of list) if (!out.has(c.slug)) out.set(c.slug, c);
+  return [...out.values()];
+}
+
+/**
+ * The entry that carries our MAL id.
+ *
+ * Anikoto stamps every episode with the MAL id of the part it belongs to, so
+ * the site itself says which entry holds which part. That is proof. A title
+ * that reads alike is only a guess — the sites name parts their own way
+ * ("Rocky Joe 2", "Demon Slayer Movie: Mugen Train", "Gintama: The Final"),
+ * so the guess misses exactly the shows where it matters.
+ *
+ * The candidates come from a title search, so they are checked in the order
+ * the site returned them and the first one that proves itself wins.
+ */
+export async function findProven(candidates, malId, { limit = 30, width = 4 } = {}) {
+  if (!malId || !candidates?.length) return null;
+  const list = candidates.slice(0, limit);
+  for (let i = 0; i < list.length; i += width) {
+    const batch = await Promise.all(list.slice(i, i + width).map(async c => {
+      const episodes = await anikotoEpisodes(c.animeId, c.slug).catch(() => []);
+      const mals = episodes.filter(e => e.mal).map(e => e.mal);
+      return mals.includes(malId) ? { ...c, episodes } : null;
+    }));
+    const hit = batch.find(Boolean);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 /** The entries animeheaven has for a title. */
 export async function heavenSearch(title) {
   const html = await get(`${HEAVEN}/fastsearch.php?xhr=1&s=${encodeURIComponent(title)}`, {
@@ -182,6 +256,10 @@ export const generic = t => /^episode\s*\d+(\s*\(\d+\))?$/i.test(String(t || '')
  * Some sites hold a whole season in one entry, numbered straight through, so
  * the second cour's first episode is episode 12 there and episode 1 here. The
  * titles say which: the entry's own episode titles have to line up with ours.
+ *
+ * A title that says nothing ("Episode 12") says nothing here either — two
+ * different parts that both number their episodes plainly would otherwise
+ * look like the same part, and the wrong one would be played.
  */
 export function matchOffset(mine, theirs) {
   if (!mine?.length || !theirs?.length) return -1;
@@ -192,7 +270,8 @@ export function matchOffset(mine, theirs) {
     let hits = 0;
     for (let i = 0; i < mine.length; i++) {
       const a = want[i], b = plain(byNum.get(i + 1 + off)?.title);
-      if (a && b && (a === b || a.includes(b) || b.includes(a))) hits++;
+      if (!a || !b || generic(a) || generic(b)) continue;
+      if (a === b || a.includes(b) || b.includes(a)) hits++;
     }
     if (hits >= enough) return off;
   }

@@ -9,7 +9,8 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { gql } from './anilist.js';
-import { anikotoEntry, anikotoEpisodes, anikotoSearch, generic, heavenSearch, matchOffset, parseTitle, pickPart, searchTitle } from './part-map.js';
+import { AUDIO_LANG, chooseAudio } from './audio-lang.js';
+import { anikotoCandidates, anikotoEntry, anikotoEpisodes, findProven, generic, heavenSearch, matchOffset, parseTitle, pickPart, samePart, sameSeries, searchTitle } from './part-map.js';
 
 const BASE = process.env.KOMA_ANIVAULT_URL || 'http://127.0.0.1:3000';
 
@@ -67,6 +68,49 @@ async function upstreamJson(rest, search, req, ms) {
   return { status: r.status, body, data };
 }
 
+/* ---------- which language is the stream in? ----------
+ *
+ * The sites put several audio tracks into one playlist and mark the first as
+ * the default, so the player takes Hindi when English was asked for. The
+ * playlist says which track is which, and the track that was asked for is the
+ * one that gets played — or, when the stream has no track in that language,
+ * the stream is passed over for another one.
+ */
+
+const masters = new Map(); // search -> { at, text } — the master playlist of a stream
+const MASTER_TTL = 10 * 60e3;
+
+/**
+ * The master playlist of a stream, as the streaming server proxies it.
+ *
+ * It is needed twice: once to see which languages the stream offers, and once
+ * to hand it to the player. Keeping it here makes the second one a copy
+ * instead of another trip to the site.
+ */
+async function masterPlaylist(search) {
+  const hit = masters.get(search);
+  if (hit && Date.now() - hit.at < MASTER_TTL) return hit.text;
+  const r = await call('/api/proxy/hls', search, null, { signal: AbortSignal.timeout(30000) });
+  if (!r.ok) throw Object.assign(new Error(`The playlist could not be read (${r.status}).`), { body: (await r.text().catch(() => '')).slice(0, 200) });
+  const text = await r.text();
+  masters.set(search, { at: Date.now(), text });
+  return text;
+}
+
+/** The language the stream has to be in for the type that was asked for. */
+async function languageCheck(r, type) {
+  const want = AUDIO_LANG[type];
+  if (!want || r.status !== 200 || r.data?.playbackMode !== 'hls' || !r.data?.hlsProxyUrl) return null;
+  const query = String(r.data.hlsProxyUrl).split('?')[1] || '';
+  if (!query) return null;
+  const search = `?${query}`;
+  const master = await masterPlaylist(search).catch(err => { console.error('[lang] master failed', err?.message, '|', err?.body || ''); return null; });
+  if (!master) return null; // the playlist says nothing — do not turn the stream away
+  const chosen = chooseAudio(master, want);
+  return { ...chosen, search, want };
+}
+
+
 /* ---------- which part of a show is this? ----------
  *
  * A show split into cours is several AniList entries, and the streaming
@@ -103,17 +147,29 @@ async function franchiseOffset(media) {
   return total;
 }
 
-/** Anikoto's own entry for this part: the entry and the episodes it holds. */
-async function ourPart(media, want, count) {
-  const candidates = await anikotoSearch(searchTitle(media.title.english || media.title.romaji || '')).catch(() => []);
-  const pick = pickPart(candidates, want, count);
-  if (!pick?.animeId) return null;
-  const episodes = await anikotoEpisodes(pick.animeId, pick.slug).catch(() => []);
-  if (!episodes.length) return null;
-  // The site says which MAL entry the episodes belong to — that is the proof.
-  const mals = episodes.filter(e => e.mal).map(e => e.mal);
-  if (mals.length && media.idMal && !mals.includes(media.idMal)) return null;
-  return { slug: pick.slug, episodes };
+/**
+ * Anikoto's own entry for this part: the entry and the episodes it holds.
+ *
+ * The title says which entry looks right; the site says which one is right.
+ * Anikoto stamps every episode with the MAL id of the part it belongs to, so
+ * when the names do not line up ("Rocky Joe 2" for "Tomorrow's Joe 2") the
+ * stamp still proves which entry holds our part.
+ */
+async function ourPart(media, want, count, candidates) {
+  const list = candidates || await anikotoCandidates(media.title.english || media.title.romaji || '').catch(() => []);
+
+  const pick = pickPart(list, want, count);
+  if (pick?.animeId) {
+    const episodes = await anikotoEpisodes(pick.animeId, pick.slug).catch(() => []);
+    if (episodes.length) {
+      const mals = episodes.filter(e => e.mal).map(e => e.mal);
+      if (!mals.length || !media.idMal || mals.includes(media.idMal)) return { slug: pick.slug, episodes };
+    }
+  }
+
+  // The title says nothing useful. Ask the site which entry holds our part.
+  const hit = await findProven(list, media.idMal).catch(() => null);
+  return hit ? { slug: hit.slug, episodes: hit.episodes } : null;
 }
 
 /**
@@ -129,15 +185,60 @@ async function malEpisodes(malId) {
   return rows.map(e => ({ num: Number(e.malId) || 0, title: e.title || '' })).filter(e => e.num > 0);
 }
 
-/** Animeheaven's entry for this part — one entry per part, and the streaming server takes its id. */
+/**
+ * Our part's episode titles, in our numbering.
+ *
+ * The sites copy their titles from the episode database, so it is the common
+ * ground for telling which episode of a merged season is ours. Where the
+ * site's own list says nothing ("Episode 12"), the database's title is used
+ * instead — a title that says nothing cannot be matched against anything.
+ */
+async function ourTitles(media, siteEpisodes) {
+  const titles = new Map();
+  for (const e of siteEpisodes || []) if (e?.num) titles.set(Number(e.num), e);
+  const named = [...titles.values()].every(e => !generic(e.title));
+  if (!named) {
+    const mal = await malEpisodes(media.idMal).catch(() => []);
+    for (const e of mal) {
+      const cur = titles.get(Number(e.num));
+      if (!cur) titles.set(Number(e.num), e);
+      else if (generic(cur.title) && !generic(e.title)) titles.set(Number(e.num), { ...cur, title: e.title });
+    }
+  }
+  return [...titles.values()].sort((a, b) => a.num - b.num);
+}
+
+/**
+ * Animeheaven's entry for this part — one entry per part, and the streaming
+ * server takes its id.
+ *
+ * Two things have to agree before an entry is ours: its name and its number
+ * of episodes. The name alone points at the wrong show ("My Hero Academia:
+ * Vigilantes" is not "My Hero Academia Season 3"), and the count alone points
+ * at the wrong season ("One Punch Man" and "One Punch Man 2" both hold
+ * twelve).
+ */
 async function heavenPart(media, want, count) {
   const candidates = await heavenSearch(searchTitle(media.title.english || media.title.romaji || '')).catch(() => []);
-  const pick = pickPart(candidates, want, count);
-  if (!pick?.id) return null;
-  const eps = await upstreamJson('/episodes', `?anilistId=${media.id}&source=animeheaven&heavenId=${pick.id}`, null, 60000).catch(() => null);
-  const n = eps?.data?.count || 0;
-  if (count && n && n > count) return null; // it holds more than this part — a different entry
-  return pick;
+  if (!candidates.length) return null;
+
+  const named = candidates
+    .map(c => ({ ...c, parsed: parseTitle(c.title) }))
+    .filter(c => sameSeries(want.series, c.parsed.series));
+  if (!named.length) return null;
+
+  const checked = await Promise.all(named.map(async c => {
+    const eps = await upstreamJson('/episodes', `?anilistId=${media.id}&source=animeheaven&heavenId=${c.id}`, null, 60000).catch(() => null);
+    return { ...c, count: eps?.data?.count || 0, episodes: eps?.data?.episodes || [] };
+  }));
+
+  // The part holds as many episodes as the episode list says.
+  const sized = count ? checked.filter(c => c.count === count) : checked;
+  if (!sized.length) return null;
+  // Of those, the one that names our part is ours.
+  const same = sized.filter(c => samePart(want, c.parsed));
+  if (!same.length) return null;
+  return same[0];
 }
 
 const plans = new Map(); // anilistId -> { at, plan }
@@ -170,10 +271,9 @@ async function buildPlan(anilistId) {
 
   // The entry belongs to another part. Find the ones that hold ours.
   const mine = await ourPart(media, want, count);
-  const episodes = mine?.episodes || [];
   // Our part's episode titles, from whoever names them the same way the sites
   // do — the site's own entry first, then the episode list the database has.
-  const titles = episodes.length ? episodes : await malEpisodes(media.idMal);
+  const titles = await ourTitles(media, mine?.episodes || []);
   const options = [];
 
   // The entry the streaming server found may still hold the whole season —
@@ -192,7 +292,17 @@ async function buildPlan(anilistId) {
     if (offset >= 0) options.push({ source: 'desidub', offset });
   }
 
-  if (!options.length) return { ok: false, error: 'This part of the show could not be found on the streaming sources.' };
+  if (!options.length) {
+    // The sites have this part — we know which entry — but the streaming
+    // server is serving another part of the show and cannot be pointed at
+    // ours. Say that, instead of pretending the part is not there.
+    return {
+      ok: false,
+      error: mine
+        ? 'This part of the show is on the sites, but the streaming server is serving another part of it.'
+        : 'This part of the show could not be found on the streaming sources.',
+    };
+  }
   return { ok: true, options, episodes: titles, fixed: true };
 }
 
@@ -247,13 +357,17 @@ async function resolveWatch(search, req) {
   } else {
     options.push({ source: q.get('source') || 'anikoto', offset: 0 });
   }
-  let last = null;
+  let last = null, mismatch = null;
   for (const opt of options) {
     const r = await watchOn(opt, q, req, type);
     if (r.status === 200) return r;
+    if (r.langMismatch) mismatch = r;
     last = r;
     if (r.status !== 404) break; // anything else is not "this source has no such episode"
   }
+  // The stream was there, but not in the language that was asked for: that is
+  // the more useful answer than "no source could play that episode".
+  if (mismatch) return mismatch;
   return last || { status: 404, body: JSON.stringify({ error: 'No source could play that episode.' }) };
 }
 
@@ -268,8 +382,29 @@ async function watchOn(opt, q, req, type) {
   const remembered = !p.has('server') && goodServer.get(key);
   if (remembered) p.set('server', remembered);
   const r = await upstreamJson('/watch', String(p) ? `?${p}` : '', req, 120000);
-  if (r.status === 200 && r.data?.server) goodServer.set(key, r.data.server);
-  else if (remembered) goodServer.delete(key);
+  // Only a server that plays in the app is worth remembering: one that can
+  // only hand back the site's own player is a worse way to watch.
+  if (r.status === 200 && r.data?.server && r.data?.playbackMode !== 'iframe') goodServer.set(key, r.data.server);
+  else if (r.status !== 200 && remembered) goodServer.delete(key);
+  if (r.status !== 200) return r;
+
+  // The stream has to be in the language that was asked for. One that is not
+  // is passed over, the same way a missing episode is.
+  const lang = await languageCheck(r, type);
+  if (lang && !lang.ok) {
+    const what = lang.want === 'en' ? 'English' : 'Japanese';
+    return {
+      status: 404,
+      body: JSON.stringify({ error: `This stream has no ${what} audio.` }),
+      data: { error: `This stream has no ${what} audio.` },
+      langMismatch: true,
+    };
+  }
+  // The playlist says which track to play, so the player is told.
+  if (lang?.ok && r.data?.hlsProxyUrl) {
+    r.data.hlsProxyUrl += (r.data.hlsProxyUrl.includes('?') ? '&' : '?') + `lang=${lang.want}`;
+    r.body = JSON.stringify(r.data);
+  }
   return r;
 }
 
@@ -328,15 +463,55 @@ export async function proxyJson(req, res, rest, search) {
   sendJson(res, r.status, r.body);
 }
 
+/** Take one parameter out of a query, leaving the others exactly as they were. */
+function withoutParam(search, name) {
+  const q = String(search || '').replace(/^\?/, '');
+  if (!q) return { value: '', search: '' };
+  const kept = [];
+  let value = '';
+  for (const part of q.split('&')) {
+    const key = part.split('=')[0].trim().toLowerCase();
+    if (key === name) {
+      try { value = decodeURIComponent(part.slice(key.length + 1)); } catch { value = part.slice(key.length + 1); }
+    } else kept.push(part);
+  }
+  return { value, search: kept.length ? `?${kept.join('&')}` : '' };
+}
+
 /** Media passthrough: /api/proxy/hls|video|subtitle -> AniVault, streamed.
  * Playlists and subtitles get the host rewrite; everything else is streamed
  * as raw bytes. CDNs sometimes disguise MPEG-TS segments with a text/html
  * content-type, so never trust the content-type alone — peek at the first
- * bytes of hls payloads to tell playlists from media. */
+ * bytes of hls payloads to tell playlists from media.
+ *
+ * A playlist that says which language it wants is served with only that
+ * language's track in it, so the player cannot pick the wrong one. */
 export async function proxyMedia(req, res, path, search) {
+  const isHls = path.startsWith('/api/proxy/hls');
+  const { value: wantLang, search: forwarded } = withoutParam(search, 'lang');
+
+  // The master playlist was read when the stream was resolved: serve that
+  // copy, narrowed to the language that was asked for.
+  if (isHls && wantLang) {
+    const hit = masters.get(forwarded);
+    if (hit && Date.now() - hit.at < MASTER_TTL) {
+      const chosen = chooseAudio(hit.text, wantLang);
+      if (chosen.ok) {
+        const out = Buffer.from(rewrite(chosen.master));
+        res.writeHead(200, {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Type': 'application/vnd.apple.mpegurl',
+          'Content-Length': out.length,
+          'Cache-Control': 'no-store',
+        });
+        return res.end(req.method === 'HEAD' ? undefined : out);
+      }
+    }
+  }
+
   let upstream;
   try {
-    upstream = await call(path, search, req, { signal: AbortSignal.timeout(60000) });
+    upstream = await call(path, forwarded, req, { signal: AbortSignal.timeout(60000) });
   } catch {
     return sendJson(res, 503, OFFLINE);
   }
@@ -347,10 +522,21 @@ export async function proxyMedia(req, res, path, search) {
     if (v && h !== 'content-length') headers[h] = v;
   }
 
+  /** The playlist, with only the language that was asked for left in it. */
+  const narrow = text => {
+    if (!isHls || !wantLang) return { ok: true, text };
+    if (!text.trimStart().startsWith('#EXTM3U')) return { ok: true, text };
+    const chosen = chooseAudio(text, wantLang);
+    return { ok: chosen.ok, text: chosen.master };
+  };
+  const noLanguage = () => sendJson(res, 404, JSON.stringify({ error: 'This stream has no audio in the language that was asked for.' }));
+
   const asText = path.startsWith('/api/proxy/subtitle') || /vtt|mpegurl/i.test(type);
   if (asText) {
     const body = await upstream.text().catch(() => '');
-    const out = Buffer.from(rewrite(body));
+    const narrowed = narrow(body);
+    if (!narrowed.ok) return noLanguage();
+    const out = Buffer.from(rewrite(narrowed.text));
     headers['content-type'] = type || 'application/octet-stream';
     headers['content-length'] = out.length;
     res.writeHead(upstream.status, headers);
@@ -364,7 +550,7 @@ export async function proxyMedia(req, res, path, search) {
   const stream = Readable.fromWeb(upstream.body);
   stream.on('error', () => res.destroy());
 
-  if (!path.startsWith('/api/proxy/hls')) { res.writeHead(upstream.status, headers); return stream.pipe(res); } // video: pure binary
+  if (!isHls) { res.writeHead(upstream.status, headers); return stream.pipe(res); } // video: pure binary
 
   // HLS: playlists must be rewritten, media must not. Peek at the first chunk
   // BEFORE sending headers: a rewritten playlist is shorter than the upstream length.
@@ -377,7 +563,9 @@ export async function proxyMedia(req, res, path, search) {
   if (head.slice(0, 512).toString('latin1').trimStart().startsWith('#EXTM3U')) {
     const chunks = [head];
     for await (const c of stream) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
-    const out = Buffer.from(rewrite(Buffer.concat(chunks).toString('utf8')));
+    const narrowed = narrow(Buffer.concat(chunks).toString('utf8'));
+    if (!narrowed.ok) return noLanguage();
+    const out = Buffer.from(rewrite(narrowed.text));
     headers['content-type'] = 'application/vnd.apple.mpegurl';
     headers['content-length'] = out.length;
     res.writeHead(upstream.status, headers);
