@@ -4,7 +4,7 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 
 | Home | Watching |
 | --- | --- |
-| ![Koma home page — spotlight, trending rows, schedule](screenshots/HomePage.png) | ![Watching an episode — custom player with sub/dub toggle](screenshots/StreamingPage.png) |
+| ![Koma home page — spotlight hero, continue watching rail](screenshots/HomePage.png) | ![Watching an episode — custom player with sub/dub toggle, autoplay and skip switches, episode list](screenshots/StreamingPage.png) |
 
 | Top 10 & coming soon |
 | --- |
@@ -18,6 +18,7 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 - **Watch-order guides** — a title in a franchise shows its story line numbered (prequels first, movies in place), with your current spot marked and side stories / spin-offs listed as extras
 - Personal list, watch progress, resume points, "continue watching" — saved locally, auto-synced with your AniList account if you sign in (flaky connections can't lose an episode mark: failed writes retry from an outbox)
 - **Continue watching** — the rail on Home and the tab on My list show only what you actually watch *here*: episodes you finished in Koma, and the episode you're in the middle of, with the exact spot you stopped. A show you added to your AniList watchlist is on your list, but it never poses as something you're watching until you start it here
+- **Resume on your terms** — a saved resume point is a choice, not something that happens to you. Open an episode you left off and Koma asks: *Continue from 3:14* picks up at the exact timestamp you stopped, *Start from the beginning* starts from zero and drops the saved point. Nothing plays until you pick, and the question is for arriving at an episode, not for reloading the one you're watching
 - **"Surprise me" and a "For you" rail** — a die in the header rolls one random well-rated anime you've never seen, and Home grows a For you row from the genres you actually finish (recent watches weigh more, your own list never shows up)
 - **My take** — your own 1–10 score, a rewatch counter, tags and a private note on every show page, summarized on the stats page — all local, never sent anywhere
 - Sub/dub episode counts on every poster, so you know before you click
@@ -30,10 +31,27 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 - **The right episode, every time** — a show split into cours is several entries, and the sites name the parts their own way ("Cour 2", "Part II", "2nd Season – Part II"). Koma works out which entry really holds the part you asked for before it plays, so the second cour of a season plays the second cour — and a site that keeps a whole season in one entry is counted correctly, using the episode database's own titles where a site's list says nothing ("Episode 12")
 - **The right entry, not just the right episode** — the streaming server picks a site's entry by comparing titles, and the sites name parts their own way ("Rocky Joe 2" for "Tomorrow's Joe 2"), so five popular shows used to land on another part of the same show. The site stamps every episode with the MAL id of the part it belongs to, so Koma knows the right entry before anything plays and hands it over instead of letting it be guessed at — and a show the streaming server has no entry for at all is found that way too
 - Auto-skip intro/outro when the source provides timestamps, autoplay next episode with a cancelable countdown, resume where you left off
+- **Captions that stay on** — captions default to English, the language you pick is remembered across episodes and survives a SUB → DUB switch, and turning captions off keeps them off instead of springing back at the next episode
+- **The next mirror, automatically** — some mirrors hand back a link the streaming host then refuses. Koma reads the playlist itself now, checks it before the player ever sees it, and walks down the list of mirrors and then the other site until something actually plays. If none of them can, the player says so in a sentence instead of leaving you at a spinner
 - Quality, speed, and subtitle menus; picture-in-picture; fullscreen; full keyboard shortcuts (space/K, J/L, arrows, F, M, N, C)
+
+**Watch together**
+- A **Watch together** button on the watch page. Start a session and Koma gives you a short six-character code
+- Anyone on the same Wi-Fi types that code, or opens the invite link you copied, and their Koma finds your machine by itself — no addresses to swap, nothing to configure
+- The viewers' players follow yours: play, pause, scrub, change episode, switch SUB ↔ DUB, and they follow along
+- **Each side keeps streaming through its own machine.** Your video never travels to anyone else; only the playhead crosses the network
+- The host can see who is watching. A viewer always knows whose session they're in, and can leave whenever they like
+- **Your machine stays private.** Koma only opens a door on your network while a session is running, and that door answers for the session alone — the rest of the app is unreachable from outside. It closes again when the session ends
 
 **The app**
 - Everything runs locally and is bundled inside the app — no Node, no Python, no npm needed on your machine
+- **Koma opens instantly** — the catalogue is remembered on disk, so the app comes back with its pages already painted, and an AniList outage no longer blanks the screen: Koma answers from its own copy
+- **Crash insurance** — if the site view ever dies, Koma reloads itself instead of leaving you a white window
+- **Media keys and the Windows flyout** — your keyboard's play/pause and next/previous keys drive the player, and the Windows media flyout shows what's playing (the episode title and cover art) with working transport controls inside it
+- **Close to tray** — the X tucks Koma into the tray instead of quitting, so a stream keeps playing while you do something else. The tray icon brings the window back, or quits properly. Turn it off in Settings → App if you prefer the old behaviour
+- **The app's own window buttons** — minimise, maximise/restore and close sit in Koma's top bar, styled like the rest of the header, and the navigation moves to the bottom bar when the window is too narrow for the header's links
+- **A scroll bar you can use** — the page draws its own scrollbar: the thumb can be dragged, the bar comes back when you reach for it, and it fades away once you stop scrolling
+- **Backups** — Settings → Data can export your watch progress, preferences and lists to a file, and restore them anywhere — handy across reinstalls
 - **Discord Rich Presence** — what you're watching shows on your own Discord profile out of the box: the show's cover art, a play/pause badge, a timing bar that follows your exact position in the episode (seek and it jumps with you, like Spotify), and a button to the Koma download site; your current page shows while you're browsing
 - **Updates that ask first** — the app downloads a new release's installer in the background and asks "Update now?" before anything runs; release notes open in-app, and a put-off installer is kept for next launch — plus it sweeps away old update downloads from AppData
 - **A version line that tells the truth** — the bottom of the footer always shows the build you are on and whether it is the latest one; if a new release is out, a button there brings the update card straight back
