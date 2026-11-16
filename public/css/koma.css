@@ -1447,13 +1447,15 @@ html.android .foot { display: none; }
 
 /* Android also draws scrollbars of its own: a native one down the page,
    sliding under the fixed header, and one on every panel that scrolls - so
-   the page carries both the drawn rail and a bar of the WebView's. The rail
-   is the scrollbar here; the built-in ones are switched off. A touch screen
-   reads position from the moving content, not from a bar, so the panels lose
-   nothing: the shelves already hide theirs. */
+   the page carries both the drawn rail and a bar of the WebView's. Here the
+   answer is the one the viewer asked for outright: no scroll slider on the
+   phone at all. The rail goes too, and the content itself says where the
+   page is - a touch screen scrolls by dragging what is on it, and the
+   shelves and panels already live without a bar. */
 html.android, html.android * { scrollbar-width: none; }
 html.android::-webkit-scrollbar,
 html.android ::-webkit-scrollbar { width: 0; height: 0; display: none; }
+html.android .scroll-rail { display: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 /* nothing may stay hidden waiting for an animation that will never run */
