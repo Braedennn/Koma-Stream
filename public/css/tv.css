@@ -415,10 +415,12 @@ html.tv .hero-inner { position: relative; max-width: none; margin: 0; }
 html.tv .slide { position: relative; }
 html.tv .slide.on {
   grid-template-columns: minmax(0, 1fr) clamp(420px, 31vw, 620px);
+  justify-items: stretch;
   align-items: center;
   gap: clamp(32px, 4vw, 80px);
   min-height: clamp(440px, 52vh, 620px);
   padding: clamp(36px, 4vw, 68px) var(--gut) clamp(56px, 5vw, 84px);
+  text-align: left;
 }
 html.tv .hero-backdrop {
   display: block;
@@ -444,7 +446,7 @@ html.tv .hero-backdrop::after {
     linear-gradient(90deg, rgba(0, 0, 0, .95) 0%, rgba(0, 0, 0, .82) 34%, rgba(0, 0, 0, .3) 68%, rgba(0, 0, 0, .62) 100%),
     linear-gradient(0deg, #000 1%, transparent 46%);
 }
-html.tv .hero-body { position: relative; z-index: 2; }
+html.tv .hero-body { position: relative; z-index: 2; width: auto; max-width: none; text-align: left; }
 html.tv .hero-figure {
   position: relative;
   z-index: 2;
@@ -455,10 +457,10 @@ html.tv .hero-figure {
 }
 html.tv .hero-figure.cover { aspect-ratio: 2 / 3; width: clamp(210px, 17vw, 300px); justify-self: end; }
 
-html.tv .hero-badge { height: 32px; padding: 0 14px; font-size: 15px; gap: 7px; }
+html.tv .hero-badge { display: inline-flex; height: 32px; padding: 0 14px; font-size: 15px; gap: 7px; }
 html.tv .hero-badge .i { width: 15px; height: 15px; }
-html.tv .hero-title { font-size: clamp(38px, 4.6vw, 82px); line-height: 1.04; max-width: 16ch; }
-html.tv .hero-meta { font-size: 18px; gap: 6px 16px; margin-top: 12px; }
+html.tv .hero-title { margin: 0; font-size: clamp(38px, 4.6vw, 82px); line-height: 1.04; max-width: 16ch; }
+html.tv .hero-meta { justify-content: flex-start; font-size: 18px; gap: 6px 16px; margin-top: 12px; }
 html.tv .hero-meta .i { width: 16px; height: 16px; }
 /* The phone hides the synopsis to keep the first screen short. A television
    has the room, and the words are what the viewer reads from the sofa. */
@@ -468,12 +470,12 @@ html.tv .hero-sub {
   -webkit-box-orient: vertical;
   overflow: hidden;
   max-width: 58ch;
-  margin-top: 16px;
+  margin: 16px 0 0;
   color: var(--text-2);
   font-size: 19px;
   line-height: 1.6;
 }
-html.tv .hero-actions { gap: 14px; margin-top: 24px; }
+html.tv .hero-actions { justify-content: flex-start; gap: 14px; margin-top: 24px; }
 html.tv .hero-actions .btn { height: 60px; padding: 0 30px; font-size: 20px; gap: 10px; }
 html.tv .hero-actions .btn .i { width: 24px; height: 24px; }
 /* The arrows sit in the corner of the picture, not under it: the space under

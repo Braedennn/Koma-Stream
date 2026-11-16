@@ -261,41 +261,43 @@ body.bar-dragging { user-select: none; cursor: grabbing; }
 .link-btn { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; padding: 0; color: var(--text-2); font-weight: 600; font-size: 13px; cursor: pointer; text-decoration: none; white-space: nowrap; transition: color .22s var(--ease-soft), gap .28s var(--ease-out); }
 .link-btn:hover { color: var(--text); gap: 7px; }
 .link-btn .i { width: 15px; height: 15px; }
-/* ---------- hero: a compact spotlight band ----------
-   The spotlight used to be a billboard: a 56px headline, a paragraph and a
-   780px artwork panel - more than half of the first screen, with the rows
-   below it pushed off the bottom. It is now a band: the text on the left, a
-   small artwork panel on the right, and the rows start right under it. */
-.hero { position: relative; padding: calc(var(--head-h) + 10px) var(--gut) 0; }
+/* ---------- hero spotlight ----------
+   The phone and desktop spotlight is a centred stack: the title and facts,
+   a short synopsis and the wide banner below them. The television has its
+   own full-screen treatment in tv.css. */
+.hero { position: relative; padding: calc(var(--head-h) + 6px) var(--gut) 0; }
 .hero-inner { position: relative; max-width: 1180px; margin-inline: auto; }
+/* The full-bleed backdrop belongs to the television spotlight. On the phone
+   and desktop it must not take a grid cell, or it pushes the title and the
+   artwork into separate rows. */
+.hero-backdrop { display: none; }
 .slide { display: none; }
-.slide.on { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: clamp(16px, 2.6vw, 36px); align-items: center; animation: hero-in .5s var(--ease-out) both; }
+.slide.on { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 22px; text-align: center; animation: hero-in .5s var(--ease-out) both; }
 @keyframes hero-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-/* the little announcement pill */
-.hero-badge { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 999px; background: rgba(248, 248, 248, .06); border: 1px solid var(--line-2); color: var(--text-2); font-size: 10px; font-weight: 600; overflow: hidden; }
-.hero-badge .i { width: 11px; height: 11px; }
-.hero-title { margin: 6px 0 0; max-width: 28ch; font-size: clamp(18px, 2.1vw, 24px); font-weight: 600; line-height: 1.12; letter-spacing: -.03em; text-wrap: balance; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.hero-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; margin-top: 6px; color: var(--text-2); font-size: 11px; font-weight: 500; }
+.hero-body { width: 100%; max-width: 760px; }
+/* The saved phone and desktop layout has no announcement pill. The TV keeps
+   it because its large screen has room for the position indicator. */
+.hero-badge { display: none; }
+.hero-title { margin: 0 auto; max-width: 680px; font-size: clamp(34px, 5.2vw, 66px); font-weight: 600; line-height: 1.04; letter-spacing: -.035em; text-wrap: balance; color: var(--text); }
+.hero-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 5px 12px; margin-top: 10px; color: var(--text-2); font-size: 13.5px; font-weight: 600; }
 .hero-meta > span { display: inline-flex; align-items: center; gap: 5px; }
-.hero-meta > span + span::before { content: ""; width: 3px; height: 3px; border-radius: 50%; background: var(--text-3); margin-right: 6px; }
+.hero-meta > span + span::before { content: ""; width: 3px; height: 3px; border-radius: 50%; background: var(--text-3); margin-right: 7px; }
 .hero-meta .star { display: inline-flex; align-items: center; gap: 4px; color: var(--star); }
-.hero-meta .i { width: 11px; height: 11px; }
-/* No paragraph: the band is a band on every screen - the phone, the
-   television and the desktop app all show the same thing. The rows below
-   matter more than a synopsis. */
-.hero-sub { display: none; }
-.hero-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
-.hero-actions .btn { height: 30px; padding: 0 10px; font-size: 12px; gap: 5px; }
-.hero-actions .btn .i { width: 14px; height: 14px; }
-/* the artwork: a small panel beside the text, not a billboard under it */
-.hero-figure { position: relative; width: clamp(92px, 10vw, 130px); aspect-ratio: 16/10; border-radius: 8px; overflow: hidden; background: var(--bg-1); border: 1px solid var(--line-2); box-shadow: var(--shadow-2); }
+.hero-meta .i { width: 14px; height: 14px; }
+.hero-sub { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 620px; margin: 15px auto 0; color: var(--text-2); font-size: 14px; line-height: 1.65; }
+.hero-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 20px; }
+.hero-actions .btn { height: 40px; padding: 0 16px; font-size: 13px; gap: 7px; }
+.hero-actions .btn .i { width: 15px; height: 15px; }
+/* The banner keeps AniList's wide shape and the full width of the saved
+   desktop layout, but never grows past the phone's screen. */
+.hero-figure { position: relative; width: min(780px, 100%); aspect-ratio: 3 / 1; border-radius: var(--r-lg); overflow: hidden; background: var(--bg-1); border: 1px solid var(--line-2); box-shadow: var(--shadow-3); }
 .hero-figure img { width: 100%; height: 100%; object-fit: cover; object-position: center 22%; }
 /* a show with no banner art gets its poster instead: blurred behind, crisp in front. */
-.hero-figure.cover { position: relative; display: grid; place-items: center; background: var(--bg-1); }
+.hero-figure.cover { position: relative; display: grid; place-items: center; width: min(280px, 100%); aspect-ratio: 2 / 3; background: var(--bg-1); }
 .hero-figure .blur { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(26px) saturate(1.2); opacity: .45; transform: scale(1.12); }
 .hero-figure .shot { position: relative; width: auto; height: 88%; aspect-ratio: 2/3; object-fit: cover; border-radius: 8px; box-shadow: 0 20px 44px -20px rgba(0, 0, 0, .65); }
 /* the slide buttons */
-.hero-ctrl { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.hero-ctrl { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; }
 .dots { display: flex; gap: 6px; align-items: center; }
 .dot { width: 16px; height: 3px; padding: 0; border: 0; border-radius: 3px; background: var(--line-2); overflow: hidden; cursor: pointer; transition: width .3s var(--ease), background .16s; }
 .dot:hover { background: var(--text-3); }
@@ -1336,8 +1338,8 @@ html.dlg-open, html.dlg-open body { overflow: hidden; }
     max-height: calc(100vh - var(--head-h) - 24px); overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .rail { --cols: 3.4; --gap: 12px; } .rail.wide { --cols: 2.4; }
   .rail-btn { display: none; }
-  .hero { padding-top: calc(var(--head-h) + 8px); }
-  .hero-figure { width: clamp(120px, 26vw, 200px); }
+  .hero { padding-top: calc(var(--head-h) + 4px); }
+  .hero-title { font-size: clamp(34px, 7vw, 54px); }
   .d-hero { min-height: 0; padding-top: calc(var(--head-h) + 28px); }
   .d-head { grid-template-columns: minmax(0, 1fr); gap: 20px; }
   .d-poster { width: 150px; }
@@ -1371,15 +1373,15 @@ html.dlg-open, html.dlg-open body { overflow: hidden; }
 @media (max-width: 560px) {
   .logo-word { display: none; }
   .rail { --cols: 2.5; } .rail.wide { --cols: 1.7; }
-  /* The spotlight on a phone: the same band as everywhere else - a line of
-     title, one line of facts and the two buttons, with a thumbnail of the
-     art beside it. Only the shape of the grid is the phone's own. */
-  .hero { padding-top: calc(var(--head-h) + 6px); }
-  .slide.on { grid-template-columns: minmax(0, 1fr) 92px; gap: 12px; }
-  /* "My list" becomes its icon on a phone: with the watch button next to it,
-     the two of them would wrap onto a second line. */
-  .hero-actions .btn-ghost span { display: none; }
-  .hero-actions .btn-ghost { padding: 0 8px; }
+  /* The phone keeps the centred spotlight, with the title scaled to the
+     screen and the banner running edge to edge inside the page gutters. */
+  .hero { padding-top: calc(var(--head-h) + 4px); }
+  .slide.on { gap: 18px; }
+  .hero-title { font-size: clamp(30px, 8.6vw, 42px); }
+  .hero-meta { gap: 4px 9px; margin-top: 9px; font-size: 12px; }
+  .hero-sub { margin-top: 13px; font-size: 13px; }
+  .hero-actions { gap: 8px; margin-top: 18px; }
+  .hero-ctrl { margin-top: 12px; }
   .sk-hero { height: 118px; }
   .d-poster { width: 124px; }
   .d-info h1 { font-size: 26px; }
@@ -1401,7 +1403,7 @@ html.dlg-open, html.dlg-open body { overflow: hidden; }
   .take-row .stars { order: 3; flex: 1 1 100%; }
   .take-row .take-val { order: 2; margin-left: auto; }
   .rank-num { font-size: 72px; margin-bottom: 50px; }
-  .hero-actions .btn { height: 36px; padding: 0 14px; }
+  .hero-actions .btn { height: 40px; padding: 0 14px; }
   .slot { grid-template-columns: 58px 42px minmax(0, 1fr); gap: 12px; padding-right: 12px; }
   .slot time { font-size: 13.5px; }
   .slot .pill { grid-column: 3; justify-self: start; margin-top: -6px; }
