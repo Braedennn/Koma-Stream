@@ -182,6 +182,20 @@ html.tv .filter-tabs button[aria-selected="true"]:is(:focus, .tv-focus) {
   color: var(--primary-fg);
   box-shadow: var(--tv-focus-glow);
 }
+/* The player carries white-filled buttons of its own - the resume offer, the
+   skip-intro button, the audio picks in its menu - and the accessibility skip
+   link is white as well. Their dark ink is the label: the focus keeps it and
+   says itself with the glow. */
+html.tv .kp-resume-go:is(:focus, .tv-focus),
+html.tv .kp-skipbtn:is(:focus, .tv-focus),
+html.tv .kp-audio button[aria-pressed="true"]:is(:focus, .tv-focus) {
+  color: #0B0B0B;
+  box-shadow: var(--tv-focus-glow);
+}
+html.tv .skip:is(:focus, .tv-focus) {
+  color: var(--primary-fg);
+  box-shadow: var(--tv-focus-glow);
+}
 html.tv .icon-btn:is(:focus, .tv-focus) {
   outline: none;
   background: var(--accent);
