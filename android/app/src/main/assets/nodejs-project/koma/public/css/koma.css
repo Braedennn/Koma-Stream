@@ -1444,6 +1444,16 @@ html.dlg-open, html.dlg-open body { overflow: hidden; }
    The footer is the website's furniture; the app is not a website. */
 html.android:not(.tv) .kp-vol-rail { display: none; }
 html.android .foot { display: none; }
+
+/* Android also draws scrollbars of its own: a native one down the page,
+   sliding under the fixed header, and one on every panel that scrolls - so
+   the page carries both the drawn rail and a bar of the WebView's. The rail
+   is the scrollbar here; the built-in ones are switched off. A touch screen
+   reads position from the moving content, not from a bar, so the panels lose
+   nothing: the shelves already hide theirs. */
+html.android, html.android * { scrollbar-width: none; }
+html.android::-webkit-scrollbar,
+html.android ::-webkit-scrollbar { width: 0; height: 0; display: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 /* nothing may stay hidden waiting for an animation that will never run */
