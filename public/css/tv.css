@@ -171,6 +171,17 @@ html.tv .btn-primary:is(:focus, .tv-focus) {
   border-color: transparent;
   box-shadow: var(--tv-focus-glow);
 }
+/* The same story for every control whose selected state is a white fill - the
+   theme picks, the subtitle languages, the schedule days, the browse filters:
+   the fill is the mark, and white ink on the white fill is the label
+   vanishing. The glow around the fill says the focus is there. */
+html.tv .seg-ctl button[aria-checked="true"]:is(:focus, .tv-focus),
+html.tv .lang-list button[aria-checked="true"]:is(:focus, .tv-focus),
+html.tv .day-btn[aria-selected="true"]:is(:focus, .tv-focus),
+html.tv .filter-tabs button[aria-selected="true"]:is(:focus, .tv-focus) {
+  color: var(--primary-fg);
+  box-shadow: var(--tv-focus-glow);
+}
 html.tv .icon-btn:is(:focus, .tv-focus) {
   outline: none;
   background: var(--accent);
@@ -396,6 +407,7 @@ html.tv .slide.on {
   padding: clamp(36px, 4vw, 68px) var(--gut) clamp(56px, 5vw, 84px);
 }
 html.tv .hero-backdrop {
+  display: block;
   position: absolute;
   inset: 0;
   z-index: 0;
