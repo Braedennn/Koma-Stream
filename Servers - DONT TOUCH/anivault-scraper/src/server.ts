@@ -88,7 +88,13 @@ app.use((_req, res) => {
   res.status(404).type('text/plain').send('Not found');
 });
 
-app.listen(PORT, () => {
+// The desktop app asks for the loopback: the streaming API is private to this
+// machine, and a server on every interface makes Windows ask for firewall
+// permission - and puts the API on the network - for nothing. A hosted
+// deployment sets no HOST and keeps listening the way it always has.
+const HOST = (process.env.HOST || '').trim();
+
+const onReady = () => {
   console.log(`\n🟢 AniVault API running on http://localhost:${PORT}`);
   console.log(`📄 Docs + Tester: http://localhost:${PORT}/`);
   console.log(`🔗 API base:      http://localhost:${PORT}/api\n`);
@@ -105,6 +111,9 @@ app.listen(PORT, () => {
     setInterval(ping, 9 * 60 * 1000); // then every 9 minutes
     console.log(`🏓 FlareSolverr pinger active → ${flaresolverrUrl}`);
   }
-});
+};
+
+if (HOST) app.listen(PORT, HOST, onReady);
+else app.listen(PORT, onReady);
 
 export default app;

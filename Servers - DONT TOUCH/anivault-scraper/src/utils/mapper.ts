@@ -75,6 +75,16 @@ async function enrichDesidub(result: SiteIds, altTitle?: string | null): Promise
 }
 
 const RECHECK_MS = 6 * 60 * 60 * 1000;
+// An entry with no source at all is a different kind of answer: it may be the
+// answer of a network that could not reach the sites, and networks change.
+// So it is looked for again much sooner - a blocked site should not keep the
+// show unplayable for hours after the block is gone.
+const RECHECK_EMPTY_MS = 5 * 60 * 1000;
+
+/** True when the entry has no source that can actually play anything. */
+function hasNoSource(result: SiteIds) {
+  return !result.siteIds.anikoto && !result.siteIds.animeheaven && !result.siteIds.desidub;
+}
 
 // MAL ID → AniList ID
 // Returns null (never throws) if AniList is down/unreachable -- callers use
@@ -121,7 +131,10 @@ export async function getSiteIds(anilistId: number): Promise<SiteIds | null> {
     // Re-search sites that didn't have this anime at most every few hours, not on every
     // request: those searches (DesiDub's especially, which is queued one at a time) cost
     // 30-70s and were being paid on every single episode lookup.
-    if (Date.now() - (cached.checkedAt || 0) < RECHECK_MS) return cached;
+    // An entry with no source at all is looked for again much sooner: it is
+    // often the answer of a network that could not reach the sites.
+    const wait = hasNoSource(cached) ? RECHECK_EMPTY_MS : RECHECK_MS;
+    if (Date.now() - (cached.checkedAt || 0) < wait) return cached;
     cached.checkedAt = Date.now();
     const wasMissingAnimeHeaven = !cached.siteIds.animeheaven;
     const wasMissingAnikoto = !cached.siteIds.anikoto;
@@ -191,7 +204,10 @@ export async function getSiteIdsByMal(malId: number): Promise<SiteIds | null> {
     // Re-search sites that didn't have this anime at most every few hours, not on every
     // request: those searches (DesiDub's especially, which is queued one at a time) cost
     // 30-70s and were being paid on every single episode lookup.
-    if (Date.now() - (cached.checkedAt || 0) < RECHECK_MS) return cached;
+    // An entry with no source at all is looked for again much sooner: it is
+    // often the answer of a network that could not reach the sites.
+    const wait = hasNoSource(cached) ? RECHECK_EMPTY_MS : RECHECK_MS;
+    if (Date.now() - (cached.checkedAt || 0) < wait) return cached;
     cached.checkedAt = Date.now();
     const wasMissingAnimeHeaven = !cached.siteIds.animeheaven;
     const wasMissingAnikoto = !cached.siteIds.anikoto;

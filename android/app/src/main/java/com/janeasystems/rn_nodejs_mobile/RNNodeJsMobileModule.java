@@ -8,9 +8,8 @@ package com.janeasystems.rn_nodejs_mobile;
 //
 // What it does: on first launch (and after every APK update) the nodejs-project
 // folder is copied out of the APK's assets into the app's private storage, and
-// Node is started in a background thread against it. Node now hosts only the
-// separate AniVault streaming sidecar; Koma's site is served by the native
-// Rust executable.
+// Node is started in a background thread against it. The WebView then talks to
+// the servers that Node hosts on the loopback.
 
 import android.content.Context;
 import android.content.pm.PackageInfo;

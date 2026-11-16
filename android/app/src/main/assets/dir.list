@@ -530,3 +530,11 @@ nodejs-project/anivault/node_modules/wrap-ansi-cjs/node_modules/emoji-regex/es20
 nodejs-project/anivault/node_modules/wrap-ansi-cjs/node_modules/string-width
 nodejs-project/anivault/node_modules/wrap-ansi-cjs/node_modules/strip-ansi
 nodejs-project/anivault/node_modules/zip-stream
+nodejs-project/koma
+nodejs-project/koma/public
+nodejs-project/koma/public/css
+nodejs-project/koma/public/js
+nodejs-project/koma/public/js/lib
+nodejs-project/koma/public/js/views
+nodejs-project/koma/server
+nodejs-project/koma/server/data

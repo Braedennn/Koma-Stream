@@ -255,8 +255,10 @@ export async function heavenSearch(title) {
 /** Titles as they are compared: letters and digits only. */
 export const plain = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
-/** Is this title just "Episode 12" with nothing to say? */
-export const generic = t => /^episode\s*\d+(\s*\(\d+\))?$/i.test(String(t || '').trim());
+/** Is this title just "Episode 12" with nothing to say? Sites also say
+ *  "Untitled" when they carry no name at all - that is a placeholder too. */
+export const generic = t => /^episode\s*\d+(\s*\(\d+\))?$/i.test(String(t || '').trim())
+  || /^untitled$/i.test(String(t || '').trim());
 
 /**
  * Where our part starts inside a bigger entry.

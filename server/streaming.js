@@ -13,6 +13,10 @@ import { AUDIO_LANG, chooseAudio } from './audio-lang.js';
 import { anikotoCandidates, anikotoEntry, anikotoEpisodes, findProven, generic, heavenSearch, matchOffset, parseTitle, pickPart, samePart, sameSeries, searchTitle } from './part-map.js';
 
 const BASE = process.env.KOMA_ANIVAULT_URL || 'http://127.0.0.1:3000';
+// The streaming server's port. It is 3000 unless the app shell had to move it
+// (something else was already on that port), so the addresses it hands out are
+// rewritten with the port it is actually on.
+const BASE_PORT = (() => { try { return new URL(BASE).port || '80'; } catch { return '3000'; } })();
 
 function loadKey() {
   if (process.env.KOMA_ANIVAULT_KEY) return process.env.KOMA_ANIVAULT_KEY;
@@ -39,7 +43,9 @@ async function call(path, search, req, { signal } = {}) {
   });
 }
 
-const rewrite = text => text.replaceAll('http://127.0.0.1:3000', '').replaceAll('http://localhost:3000', '');
+const rewrite = text => text
+  .replaceAll(`http://127.0.0.1:${BASE_PORT}`, '')
+  .replaceAll(`http://localhost:${BASE_PORT}`, '');
 
 function sendJson(res, status, body) {
   const buf = Buffer.from(body);
@@ -51,6 +57,13 @@ function sendJson(res, status, body) {
 const watchCache = new Map(); // "path?search" -> { at, status, body } — watch resolves take seconds upstream
 const inflight = new Map();   // same key -> pending { status, body }, so a prefetch and the real request share one resolve
 const WATCH_TTL = 60e3, WATCH_CAP = 32;
+
+// The whole watch resolution has a budget. The browser gives up after two
+// minutes (public/js/streaming.js), and a player that says "couldn't get a
+// stream" while the server is still working says nothing useful: the reason
+// never reaches the screen. So the server finishes inside its own budget and
+// names what stopped it.
+const WATCH_BUDGET = 90e3;
 
 // AniVault tries a source's video servers one after another, and a dead one can burn 8-16s on
 // timeouts before it moves on. So Koma remembers which server last worked (per source + sub/dub)
@@ -87,27 +100,52 @@ const MASTER_TTL = 10 * 60e3;
  * to hand it to the player. Keeping it here makes the second one a copy
  * instead of another trip to the site.
  */
-async function masterPlaylist(search) {
+async function masterPlaylist(search, ms = 30000) {
   const hit = masters.get(search);
   if (hit && Date.now() - hit.at < MASTER_TTL) return hit.text;
-  const r = await call('/api/proxy/hls', search, null, { signal: AbortSignal.timeout(30000) });
+  const r = await call('/api/proxy/hls', search, null, { signal: AbortSignal.timeout(ms) });
   if (!r.ok) throw Object.assign(new Error(`The playlist could not be read (${r.status}).`), { body: (await r.text().catch(() => '')).slice(0, 200) });
   const text = await r.text();
   masters.set(search, { at: Date.now(), text });
   return text;
 }
 
+/** The query behind a watch answer's playlist URL. */
+function playlistQuery(r) {
+  const url = r?.data?.hlsProxyUrl;
+  if (!url) return '';
+  const query = String(url).split('?')[1] || '';
+  return query ? `?${query}` : '';
+}
+
+/**
+ * Read the playlist the player is about to load.
+ *
+ * Null when the host refused it (a 502) or sent something that is not a
+ * playlist at all. This is the file the viewer waits for, so a dead one has
+ * to be caught here rather than in the player's spinner.
+ */
+async function readPlaylist(r, ms = 30000) {
+  const search = playlistQuery(r);
+  if (!search) return null;
+  const text = await masterPlaylist(search, ms).catch(err => {
+    console.error('[stream] the playlist did not load:', err?.message, '|', err?.body || '');
+    return null;
+  });
+  if (!text || !text.trimStart().startsWith('#EXTM3U')) {
+    console.error('[stream] the host did not send a playlist');
+    return null;
+  }
+  return text;
+}
+
 /** The language the stream has to be in for the type that was asked for. */
-async function languageCheck(r, type) {
+function languageCheck(r, type, master) {
   const want = AUDIO_LANG[type];
   if (!want || r.status !== 200 || r.data?.playbackMode !== 'hls' || !r.data?.hlsProxyUrl) return null;
-  const query = String(r.data.hlsProxyUrl).split('?')[1] || '';
-  if (!query) return null;
-  const search = `?${query}`;
-  const master = await masterPlaylist(search).catch(err => { console.error('[lang] master failed', err?.message, '|', err?.body || ''); return null; });
   if (!master) return null; // the playlist says nothing — do not turn the stream away
   const chosen = chooseAudio(master, want);
-  return { ...chosen, search, want };
+  return { ...chosen, want };
 }
 
 
@@ -246,6 +284,64 @@ async function heavenPart(media, want, count) {
 const plans = new Map(); // anilistId -> { at, plan }
 const PLAN_TTL = 30 * 60e3;
 
+/* ---------- can this machine reach the sources at all? ---------- *
+ *
+ * The source sites are other people's servers. On a network that filters or
+ * blocks them, every episode comes back as "not found" with no reason at all,
+ * and the app looks broken rather than blocked. So when a watch fails, the
+ * sites are asked directly - from this machine - and the answer can name the
+ * one that is out of reach.
+ *
+ * The answer is remembered for a minute: the next attempt fails the same way,
+ * and the check should not be paid for twice.
+ */
+const SOURCE_SITES = process.env.KOMA_SOURCE_SITES
+  // A different set of sources can be named, for a mirror or for a test.
+  ? process.env.KOMA_SOURCE_SITES.split(',').filter(Boolean).map(s => {
+    const [group, name, host] = s.split('|');
+    return { group: group || 'catalogue', name: name || host, host: host || name };
+  })
+  : [
+    { group: 'catalogue', name: 'Anikoto', host: 'anikoto.net' },
+    { group: 'catalogue', name: 'AnimeHeaven', host: 'animeheaven.me' },
+    { group: 'catalogue', name: 'DesiDub', host: 'www.desidubanime.me' },
+    { group: 'playback', name: 'Megaplay', host: 'megaplay.buzz' },
+    { group: 'playback', name: 'Vidwish', host: 'vidwish.live' },
+    { group: 'playback', name: 'Vidtube', host: 'vidtube.site' },
+  ];
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+let sourceHealth = { at: 0, sites: [] };
+async function checkSources() {
+  if (Date.now() - sourceHealth.at < 60e3) return sourceHealth.sites;
+  const sites = await Promise.all(SOURCE_SITES.map(async s => {
+    try {
+      const r = await fetch(`https://${s.host}/`, {
+        method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(6000),
+        headers: { 'user-agent': UA, accept: 'text/html,*/*' },
+      });
+      // The sites that only answer the exact request they are given still
+      // count as reachable as soon as they answer at all.
+      return { ...s, ok: r.status > 0 && r.status < 400, status: r.status };
+    } catch (err) {
+      return { ...s, ok: false, error: err.cause?.code || err.name || 'no answer' };
+    }
+  }));
+  sourceHealth = { at: Date.now(), sites };
+  return sites;
+}
+
+/** What is out of reach, in a sentence that can be shown to the viewer. */
+async function sourceProblem(sites = null) {
+  const list = sites || await checkSources().catch(() => []);
+  const catalogue = list.filter(s => s.group === 'catalogue' && !s.ok);
+  const playback = list.filter(s => s.group === 'playback' && !s.ok);
+  const parts = [];
+  if (catalogue.length) parts.push(`the source sites ${catalogue.map(s => s.name).join(' and ')} could not be reached (${catalogue.map(s => s.error || `answered ${s.status}`).join(', ')})`);
+  if (playback.length) parts.push(`the video hosts ${playback.map(s => s.name).join(' and ')} could not be reached (${playback.map(s => s.error || `answered ${s.status}`).join(', ')})`);
+  return parts.length ? ` ${parts.join('; ')}.` : '';
+}
+
 /**
  * The plan for one show: which entries really hold the part that was asked
  * for, and how their episodes are numbered.
@@ -274,7 +370,10 @@ async function buildPlan(anilistId) {
     // is a weak answer: it is not kept, so the next attempt reads the site
     // again instead of living with it for half an hour.
     const weak = !own || !entry.episodes?.length;
-    return { ok: true, weak, options: [{ source: 'anikoto', siteId: entry.siteId, offset: 0 }], episodes: entry?.episodes || [] };
+    // The site's own list often says nothing but "Episode 12" — the episode
+    // database names them, and a grid of numbers is not a list of episodes.
+    const episodes = await ourTitles(media, entry.episodes).catch(() => entry.episodes || []);
+    return { ok: true, weak, options: [{ source: 'anikoto', siteId: entry.siteId, offset: 0 }], episodes };
   }
 
   // The entry belongs to another part — or the streaming server has no entry
@@ -316,11 +415,14 @@ async function buildPlan(anilistId) {
     // The sites have this part — we know which entry — but the streaming
     // server is serving another part of the show and cannot be pointed at
     // ours. Say that, instead of pretending the part is not there.
+    // And if the sites could not be reached at all, say that too: a network
+    // that blocks them looks exactly like a show that is not there.
+    const blocked = await sourceProblem();
     return {
       ok: false,
-      error: mine
+      error: (mine
         ? 'This part of the show is on the sites, but the streaming server is serving another part of it.'
-        : 'This part of the show could not be found on the streaming sources.',
+        : 'This part of the show could not be found on the streaming sources.') + blocked,
     };
   }
   return { ok: true, options, episodes: titles, fixed: true };
@@ -368,33 +470,117 @@ async function partEpisodes(anilistId, plan) {
 async function resolveWatch(search, req) {
   const q = new URLSearchParams(search);
   const type = q.get('type') || 'sub';
+  // Everything below happens inside this budget. A source that hangs must not
+  // push the answer past the browser's patience - and the viewer has to be
+  // told what stopped it.
+  //
+  // The browser says how long it is still waiting (x-koma-deadline), so the
+  // server finishes a little before the browser gives up. Its answer - with
+  // the reason in it - still reaches the screen.
+  const askedMs = Number(req?.headers?.['x-koma-deadline']);
+  const room = Number.isFinite(askedMs) && askedMs > 0 ? askedMs : WATCH_BUDGET;
+  const deadline = Date.now() + Math.max(5000, Math.min(WATCH_BUDGET, room - 8000));
   const options = [];
   const anilistId = q.get('anilistId');
   if (anilistId) {
     // The plan says which entries really hold this part of the show, and how
     // their episodes are numbered. Without it a second cour can play the first.
-    const plan = await planFor(anilistId);
+    // It is built by asking the sites, so on a network that filters them it
+    // can take minutes - and the viewer cannot wait that long.
+    const plan = await firstAnswer(planFor(anilistId), deadline - Date.now(), null);
+    if (!plan) return timedOut('The streaming sources took too long to answer from this network.');
     if (!plan.ok) return { status: 404, body: JSON.stringify({ error: plan.error }) };
     options.push(...(plan.options?.length ? plan.options : [{ source: q.get('source') || 'anikoto', offset: 0 }]));
   } else {
     options.push({ source: q.get('source') || 'anikoto', offset: 0 });
   }
-  let last = null, mismatch = null;
+  // The source the page asked for is tried as well: a site that refuses its
+  // playlists should not stop the other site from playing the episode.
+  const asked = q.get('source');
+  if (asked && !options.some(o => o.source === asked)) options.push({ source: asked, offset: 0 });
+  let last = null, mismatch = null, ranOut = false;
   for (const opt of options) {
-    const r = await watchOn(opt, q, req, type);
+    if (Date.now() >= deadline) { ranOut = true; break; }
+    const r = await watchOn(opt, q, req, type, deadline);
     if (r.status === 200) return r;
     if (r.langMismatch) mismatch = r;
     last = r;
-    if (r.status !== 404) break; // anything else is not "this source has no such episode"
+    // 404: this source has no such episode. 502: it has one, but the host
+    // refuses to serve it — the next source may still play it.
+    if (r.status !== 404 && r.status !== 502) break;
   }
   // The stream was there, but not in the language that was asked for: that is
   // the more useful answer than "no source could play that episode".
   if (mismatch) return mismatch;
-  return last || { status: 404, body: JSON.stringify({ error: 'No source could play that episode.' }) };
+
+  // The sources did not answer in time. That is worth saying plainly, and the
+  // sites are asked what was wrong with them - a site that cannot be reached
+  // from this network is the reason the answer was late.
+  if (ranOut) {
+    return timedOut('The streaming sources took too long to answer from this network.');
+  }
+
+  // The streaming server's own answer is often a bare "Not found" - it cannot
+  // know that the source site is out of reach, because that is a question
+  // about this network and only this machine can answer it. So the sites are
+  // asked from here, and the answer is put into the message the viewer reads.
+  const blocked = await sourceProblem();
+  const final = last || { status: 404, data: null };
+  if (final.status === 404 || final.status === 502) {
+    const said = String(final.data?.error || '').trim();
+    const bare = !said || /^(not found|notfound|all servers failed|no source could play that episode\.?)$/i.test(said);
+    // The reason is added once: a message that already carries it is left alone.
+    const reason = blocked && !said.includes(blocked.trim()) ? blocked : '';
+    const error = (bare ? 'This part of the show could not be found on the streaming sources.' : said) + reason;
+    const data = { ...(final.data || {}), error };
+    return { ...final, body: JSON.stringify(data), data };
+  }
+  return final;
+}
+
+/** The answer when something did not answer in time - and what was wrong with it. */
+async function timedOut(sentence) {
+  const error = sentence + await sourceProblem();
+  return { status: 504, body: JSON.stringify({ error }), data: { error } };
+}
+
+/**
+ * The answer has to arrive while the browser is still waiting.
+ *
+ * The browser says how long it is willing to wait (x-koma-deadline). The work
+ * goes on in the background - it fills the caches, and it may still find the
+ * stream - but the viewer gets an answer that says what is wrong instead of a
+ * spinner that never ends.
+ *
+ * `late` is the answer for "it took too long". It is a function so that the
+ * check of the source sites only runs when it is actually needed.
+ */
+function firstAnswer(work, ms, late) {
+  let timer;
+  const timeout = new Promise(resolve => {
+    timer = setTimeout(() => resolve(typeof late === 'function' ? late() : late), Math.max(0, ms));
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** The same watch request, pinned to one mirror of the episode. */
+function pinnedTo(p, server, fresh = false) {
+  const q = new URLSearchParams(String(p));
+  q.set('server', server);
+  q.set('strict', '1'); // this mirror only — the walk wants to know this one
+  if (fresh) q.set('nocache', '1'); // resolve the link from scratch, not from what was kept
+  return q;
 }
 
 /** One source, one episode — the episode number the way that source counts it. */
-async function watchOn(opt, q, req, type) {
+export { checkSources, sourceProblem };
+
+export async function watchOn(opt, q, req, type, deadline) {
+  // Every call in here is given only the time that is left. A mirror that
+  // hangs must not eat the whole budget: the other mirrors and the other
+  // sources still have to be tried inside it.
+  const until = deadline || (Date.now() + WATCH_BUDGET);
+  const left = () => Math.max(0, until - Date.now());
   const p = new URLSearchParams(q);
   p.set('source', opt.source);
   if (opt.heavenId) p.set('heavenId', opt.heavenId); else p.delete('heavenId');
@@ -405,12 +591,26 @@ async function watchOn(opt, q, req, type) {
   const key = `${opt.source}:${type}`;
   const remembered = !p.has('server') && goodServer.get(key);
   if (remembered) p.set('server', remembered);
-  const r = await upstreamJson('/watch', String(p) ? `?${p}` : '', req, 120000);
-  // Only a server that plays in the app is worth remembering: one that can
-  // only hand back the site's own player is a worse way to watch.
-  if (r.status === 200 && r.data?.server && r.data?.playbackMode !== 'iframe') goodServer.set(key, r.data.server);
-  else if (r.status !== 200 && remembered) goodServer.delete(key);
-  if (r.status !== 200) return r;
+  let r = null, why = '';
+  try {
+    r = await upstreamJson('/watch', String(p) ? `?${p}` : '', req, Math.min(120000, left() || 1));
+  } catch (err) {
+    // A refused connection means the server is not there; a timeout means it
+    // is there and busy. Those are different problems and get different words.
+    why = err?.name === 'TimeoutError' || err?.name === 'AbortError' ? 'timeout' : 'down';
+  }
+  if (!r) {
+    if (why === 'down') return { status: 503, body: OFFLINE, data: { error: JSON.parse(OFFLINE).error } };
+    if (left() <= 0) return timedOut('The streaming sources took too long to answer from this network.');
+    // The streaming server did not answer in time. That is the reason, and it
+    // is said: "not running" would be a guess. The sites are asked as well -
+    // a source site that cannot be reached is what makes it hang.
+    return timedOut('The streaming server took too long to answer.');
+  }
+  if (r.status !== 200) {
+    if (remembered) goodServer.delete(key);
+    return r;
+  }
 
   // Which entry is playing: the one that was proven to hold this part of the
   // show. The streaming server does not say, so it is said here.
@@ -419,9 +619,54 @@ async function watchOn(opt, q, req, type) {
     r.body = JSON.stringify(r.data);
   }
 
+  // The answer names the playlist the player will load, and a mirror can hand
+  // back a link the host then refuses — the playlist answers 502 and the
+  // viewer gets a spinner and nothing else. So the playlist is read here, and
+  // the other mirrors of the episode are tried until one actually answers.
+  const mirrors = [...new Set([r.data?.server, ...(r.data?.availableServers || [])].filter(s => typeof s === 'string' && s))];
+  let answer = null;
+  let master = null;
+  for (const server of mirrors) {
+    if (left() <= 0) break;
+    const attempt = server === r.data?.server
+      ? r
+      : await upstreamJson('/watch', `?${pinnedTo(p, server)}`, req, Math.min(120000, left() || 1)).catch(() => ({ status: 0, body: '', data: null }));
+    if (attempt.status !== 200 || !attempt.data?.hlsProxyUrl) continue;
+    let text = await readPlaylist(attempt, Math.min(30000, left() || 1));
+    if (!text) {
+      // The host refused the link. It may be the link that was signed with a
+      // key the site has since changed, so the mirror is resolved once more
+      // from scratch before it is given up on.
+      if (left() <= 0) break;
+      const again = await upstreamJson('/watch', `?${pinnedTo(p, server, true)}`, req, Math.min(120000, left() || 1)).catch(() => ({ status: 0, body: '', data: null }));
+      if (again.status === 200 && again.data?.hlsProxyUrl) text = await readPlaylist(again, Math.min(30000, left() || 1));
+      if (text) { answer = again; master = text; break; }
+      console.error(`[stream] ${server}: the playlist did not load — trying the next mirror`);
+      continue;
+    }
+    answer = attempt;
+    master = text;
+    break;
+  }
+  if (!answer) {
+    // The host refused the playlist. When the host itself cannot be reached
+    // from this network, that is worth saying: it is not the episode's fault.
+    // And when the budget ran out, the mirrors were never all tried - that is
+    // the honest reason.
+    const late = left() <= 0;
+    const error = (late
+      ? 'The streaming sources took too long to answer from this network.'
+      : 'The streaming host refused the playlist for this episode.') + await sourceProblem();
+    return { status: late ? 504 : 502, body: JSON.stringify({ error }), data: { error } };
+  }
+  // Only a mirror that plays is worth remembering: one that cannot is a worse
+  // way to watch than the next one.
+  if (answer.data?.server && answer.data?.playbackMode !== 'iframe') goodServer.set(key, answer.data.server);
+  else goodServer.delete(key);
+
   // The stream has to be in the language that was asked for. One that is not
   // is passed over, the same way a missing episode is.
-  const lang = await languageCheck(r, type);
+  const lang = languageCheck(answer, type, master);
   if (lang && !lang.ok) {
     const what = lang.want === 'en' ? 'English' : 'Japanese';
     return {
@@ -432,11 +677,11 @@ async function watchOn(opt, q, req, type) {
     };
   }
   // The playlist says which track to play, so the player is told.
-  if (lang?.ok && r.data?.hlsProxyUrl) {
-    r.data.hlsProxyUrl += (r.data.hlsProxyUrl.includes('?') ? '&' : '?') + `lang=${lang.want}`;
-    r.body = JSON.stringify(r.data);
+  if (lang?.ok && answer.data?.hlsProxyUrl) {
+    answer.data.hlsProxyUrl += (answer.data.hlsProxyUrl.includes('?') ? '&' : '?') + `lang=${lang.want}`;
+    answer.body = JSON.stringify(answer.data);
   }
-  return r;
+  return answer;
 }
 
 /** The episode list of this part of the show — titles and pictures that belong to it. */
@@ -450,7 +695,46 @@ async function partList(search) {
   return { episodes, offset, count: episodes.length, source: plan.options?.[0]?.source || 'anikoto', fixed: !!plan.fixed };
 }
 
+/* ---------- episode thumbnails for the grid ---------- *
+ *
+ * The sources and AniList only carry pictures for the handful of episodes
+ * their own listings name (a Crunchyroll page's latest cour, say), so a long
+ * show's grid is numbers instead of pictures. The episode database has a
+ * still for every episode, and AniVault reads it per episode — so a page of
+ * the grid asks for its own range, and the answers are kept.
+ */
+const thumbsCache = new Map(); // "anilistId:from:to" -> { at, thumbs }
+const THUMBS_TTL = 24 * 60e3;
+
+async function episodeThumbs(search) {
+  const q = new URLSearchParams(search || '');
+  const anilistId = q.get('anilistId');
+  if (!anilistId) return null;
+  const from = Math.max(1, Number(q.get('from')) || 1);
+  const to = Math.min(3000, Math.max(from, Number(q.get('to')) || from));
+  const key = `${anilistId}:${from}:${to}`;
+  const hit = thumbsCache.get(key);
+  if (hit && Date.now() - hit.at < THUMBS_TTL) return { thumbs: hit.thumbs };
+  const media = await mediaOf(anilistId).catch(() => null);
+  if (!media?.idMal) return { thumbs: {} };
+  const nums = [];
+  for (let n = from; n <= to; n++) nums.push(n);
+  const thumbs = { ...(hit?.thumbs || {}) };
+  await Promise.all(nums.map(async n => {
+    if (thumbs[n]) return;
+    const r = await upstreamJson('/kitsu/episode-thumb', `?malId=${media.idMal}&ep=${n}`, null, 20000).catch(() => null);
+    if (r?.data?.data?.thumbnail) thumbs[n] = r.data.data.thumbnail;
+  }));
+  thumbsCache.set(key, { at: Date.now(), thumbs });
+  return { thumbs };
+}
+
 export async function proxyJson(req, res, rest, search) {
+  // Pictures for a page of the episode grid: asked for lazily, per page.
+  if (rest === '/episode-thumbs' && /(^|[?&])anilistId=/.test(search || '')) {
+    const t = await episodeThumbs(search).catch(() => null);
+    if (t) return sendJson(res, 200, JSON.stringify(t));
+  }
   // The episode list of a part of a show comes from Koma, not from the
   // streaming server: only Koma knows which entry holds the part that was
   // asked for, and which titles belong to it.
@@ -478,14 +762,33 @@ export async function proxyJson(req, res, rest, search) {
   }
   const job = rest === '/watch' ? resolveWatch(search, req)
     : upstreamJson(rest, search, req, 120000);
-  if (cacheable) inflight.set(key, job);
+  if (cacheable) {
+    inflight.set(key, job);
+    // The inflight entry goes when the work is really done. An answer that
+    // was sent early - because the viewer stopped waiting - does not end the
+    // work: it may still find the stream, and the next request can have it.
+    job.catch(() => {}).finally(() => { if (inflight.get(key) === job) inflight.delete(key); });
+  }
   let r;
   try {
-    r = await job;
+    if (rest !== '/watch') {
+      r = await job;
+    } else {
+      // The browser says how long it is willing to wait. The answer has to be
+      // written before that time is up - and the check of the source sites
+      // needs a moment of its own.
+      const askedMs = Number(req?.headers?.['x-koma-deadline']);
+      const room = Number.isFinite(askedMs) && askedMs > 0 ? askedMs : WATCH_BUDGET;
+      r = await firstAnswer(job, Math.max(3000, room - 12000), () => timedOut('The streaming sources took too long to answer from this network.'));
+    }
   } catch {
+    // A watch that threw is a watch that ran out of time: the answer says so,
+    // and names the site that is out of reach when there is one.
+    if (rest === '/watch') {
+      const late = await timedOut('The streaming sources took too long to answer from this network.');
+      return sendJson(res, late.status, late.body);
+    }
     return sendJson(res, 503, OFFLINE);
-  } finally {
-    if (inflight.get(key) === job) inflight.delete(key);
   }
   if (cacheable && r.status === 200) {
     if (watchCache.size >= WATCH_CAP) watchCache.delete(watchCache.keys().next().value);

@@ -1239,6 +1239,12 @@ export async function searchDesidub(query: string): Promise<DesidubSearchResult[
   if (cached) return cached;
 
   const results: DesidubSearchResult[] = [];
+  // Whether the site answered at all. A site that cannot be reached is worth
+  // knowing about: the caller stops asking instead of waiting for every
+  // variant to fail in turn, and the failure is not remembered as "this show
+  // is not here".
+  let answered = false;
+  let unreachable = false;
 
   // 1. Try Instant Search API (action=instant_search with nonce)
   try {
@@ -1256,6 +1262,7 @@ export async function searchDesidub(query: string): Promise<DesidubSearchResult[
       timeout: 10000,
       validateStatus: (status) => status < 500,
     });
+    answered = true;
 
     if (res.status === 403 || res.data === -1 || res.data === '-1') {
       cachedSearchNonce = null;
@@ -1296,6 +1303,7 @@ export async function searchDesidub(query: string): Promise<DesidubSearchResult[
     }
   } catch (e) {
     // Fall back to advanced_search
+    if (!e?.response) unreachable = true;
   }
 
   // 2. Fallback: advanced_search POST
@@ -1315,6 +1323,7 @@ export async function searchDesidub(query: string): Promise<DesidubSearchResult[
         },
         timeout: 10000,
       });
+      answered = true;
 
       const html = res.data?.data?.html || (typeof res.data?.data === 'string' ? res.data.data : '');
       if (html) {
@@ -1353,13 +1362,16 @@ export async function searchDesidub(query: string): Promise<DesidubSearchResult[
           }
         });
       }
-    } catch (e) {}
+    } catch (e) {
+      if (!e?.response) unreachable = true;
+    }
   }
 
   // 3. Fallback: standard search page
   if (results.length === 0) {
     try {
       const res = await http.get('/', { params: { s: query } });
+      answered = true;
       const $ = cheerio.load(res.data);
       $('article, .anime-card, .film-item, .post-item, .bsx, .animposx').each((_, el) => {
         const $el = $(el);
@@ -1378,7 +1390,15 @@ export async function searchDesidub(query: string): Promise<DesidubSearchResult[
           results.push({ slug, title, titleEn, titleJp, image: img });
         }
       });
-    } catch (e) {}
+    } catch (e) {
+      if (!e?.response) unreachable = true;
+    }
+  }
+
+  // The site never answered. That is not "this show is not here" - and the
+  // caller has to be able to tell the two apart.
+  if (!answered && unreachable) {
+    throw Object.assign(new Error('DesiDub could not be reached.'), { code: 'ENETUNREACH' });
   }
 
   cacheSet(cacheKey, results, 'episodes');
@@ -1397,7 +1417,21 @@ export async function findDesidubSlug(title: string): Promise<string | null> {
   // titles resolve on the first variant anyway.
   const allResults: DesidubSearchResult[] = [];
   for (const variant of desidubSearchVariants(cleanTitle)) {
-    const results = await searchDesidub(variant).catch(() => []);
+    let results: DesidubSearchResult[] = [];
+    try {
+      results = await searchDesidub(variant);
+    } catch (err: any) {
+      // A site that cannot be reached will not answer for the next variant
+      // either, and every try costs the full timeout - so the search ends
+      // here instead of burning minutes on a network that filters us.
+      // A site that answered and refused is a different thing: the next
+      // variant may still work.
+      if (!err?.response) {
+        console.error(`[DesiDub] the site could not be reached: ${variant} -> ${err?.message ?? err}`);
+        return null;
+      }
+      console.error(`[DesiDub] the site refused the search: ${variant} -> ${err?.response?.status}`);
+    }
     allResults.push(...results);
     if (results.some((r) => scoreTitle(cleanTitle, r.titleEn || r.title) >= 80)) break;
   }

@@ -214,10 +214,19 @@ export async function findAnimeHeavenId(title: string): Promise<string | null> {
 
   const allResults: HeavenSearchResult[] = [];
   for (const variant of variants) {
-    const results = await searchAnimeHeaven(variant).catch((error: any) => {
+    let results: HeavenSearchResult[] = [];
+    try {
+      results = await searchAnimeHeaven(variant);
+    } catch (error: any) {
+      // A site that cannot be reached will not answer for the next variant
+      // either, and every try costs the full timeout - so the search ends
+      // here instead of burning minutes on a network that filters us.
+      if (!error?.response) {
+        console.error(`[AnimeHeaven] the site could not be reached: ${variant} -> ${error?.message ?? error}`);
+        return null;
+      }
       console.error(`[AnimeHeaven] variant failed: ${variant} -> ${error?.response?.status ?? error?.message ?? error}`);
-      return [];
-    });
+    }
     allResults.push(...results);
     if (results.some((result) => scoreTitle(title, result.title) >= 80)) break;
   }

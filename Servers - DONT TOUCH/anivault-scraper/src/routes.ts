@@ -128,6 +128,13 @@ async function fetchEpisodes(source: Source, siteIds: any, overrides: { heavenId
   return { episodes: [], siteId: '', error: 'Unknown source' };
 }
 
+// Who is answering on this port? The app shell asks this before it reuses a
+// port: another program sitting on 3000 would answer 404 for everything, and
+// the app would look broken with no clue why.
+router.get('/ping', (_req: Request, res: Response) => {
+  res.json({ app: 'anivault', ok: true });
+});
+
 router.get('/search', async (req: Request, res: Response) => {
   const q = req.query.q as string;
   if (!q) return res.status(400).json({ error: 'Missing ?q=' });
@@ -314,10 +321,15 @@ async function watchHandler(req: Request, res: Response) {
 
     let embedResult: any = null;
     let usedServer = '';
+    // `nocache=1` asks for the links to be resolved from scratch, without the
+    // player page's scripts that were kept from the last resolution. It is
+    // what a caller uses when a signed link was refused: the site's signing
+    // key may have changed, and the kept one would sign it the old way.
+    const freshResolve = req.query.nocache === '1' || req.query.nocache === 'true';
     for (const server of candidates) {
       let raw: any = null;
       if (source === 'animeheaven') raw = await getHeavenStream(server.sourceId, server.referer);
-      if (source === 'anikoto') raw = await getAnikotoEmbedUrl(server.sourceId);
+      if (source === 'anikoto') raw = await getAnikotoEmbedUrl(server.sourceId, freshResolve);
       if (source === 'desidub') raw = await getDesidubStream(server.sourceId);
       if (raw) { embedResult = raw; usedServer = server.name; break; }
     }

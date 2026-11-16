@@ -1,16 +1,33 @@
 // JSON endpoints. Every query lives here, so the browser never talks to AniList directly.
 import { gql, UpstreamError } from './anilist.js';
 import { audioSnapshot } from './audio.js';
+import { dubIndexLoaded, ensureDubIndex, hasDub } from './dubindex.js';
 
+// The trailer rides along with every card: it is what a hovered card plays,
+// and it is a couple of dozen bytes per title next to the cover art.
 const CARD = `id title{romaji english native} coverImage{extraLarge large medium color} bannerImage
   format episodes averageScore popularity season seasonYear status description(asHtml:false)
-  genres studios(isMain:true){nodes{name}} nextAiringEpisode{episode airingAt}`;
-const MINI = `id title{romaji english native} coverImage{large medium color} format episodes averageScore seasonYear`;
+  genres studios(isMain:true){nodes{name}} nextAiringEpisode{episode airingAt} trailer{id site}`;
+const MINI = `id title{romaji english native} coverImage{large medium color} format episodes averageScore seasonYear trailer{id site}`;
 
 const SEASONS = ['WINTER', 'SPRING', 'SUMMER', 'FALL'];
 const FORMATS = ['TV', 'TV_SHORT', 'MOVIE', 'SPECIAL', 'OVA', 'ONA', 'MUSIC'];
 const STATUSES = ['RELEASING', 'FINISHED', 'NOT_YET_RELEASED', 'CANCELLED', 'HIATUS'];
 const SORTS = ['POPULARITY_DESC', 'TRENDING_DESC', 'SCORE_DESC', 'START_DATE_DESC', 'FAVOURITES_DESC', 'TITLE_ROMAJI'];
+
+// AniList's adult flag does not catch every explicit tag: "Incest", for
+// example, is still returned as a normal tag. These never belong in Koma's
+// browse list or on a show's details page.
+const EXPLICIT_TAGS = new Set([
+  '4-koma', 'Body Horror', 'Brainwashing', 'Cannibalism', 'Death Game',
+  'Ero Guro', 'Gore', 'Human Experimentation', 'Incest', 'Nudity',
+  'Primarily Adult Cast', 'Psychosexual', 'Slavery', 'Succubus', 'Suicide',
+  'Torture',
+]);
+const EXPLICIT_TAG_WORD = /\b(?:adult cast|erotic|erotica|hentai|incest|nsfw|porn(?:ography)?|rape|masturbation|orgasm|penis|vagina|genitals?|nudity|sex(?:ual)?|succubus)\b/i;
+const safeTag = tag => !tag?.isAdult
+  && !EXPLICIT_TAGS.has(tag?.name)
+  && !EXPLICIT_TAG_WORD.test(String(tag?.name || ''));
 
 class BadRequest extends UpstreamError { constructor(m) { super(m, 400); } }
 
@@ -69,8 +86,10 @@ export async function genres() {
 }
 
 export async function tags() {
-  const d = await gql('query{MediaTagCollection{id name isAdult}}', {}, 86400);
-  return { tags: d.MediaTagCollection.filter(t => !t.isAdult).map(t => t.name) };
+  // isMediaSpoiler is part of the query so the cached answer is keyed to the
+  // safe-tag rules as well; AniList can add a new explicit tag at any time.
+  const d = await gql('query{MediaTagCollection{id name isAdult isMediaSpoiler}}', {}, 86400);
+  return { tags: d.MediaTagCollection.filter(safeTag).map(t => t.name) };
 }
 
 export async function browse(q) {
@@ -82,8 +101,8 @@ export async function browse(q) {
   const args = ['type:ANIME', 'isAdult:false', 'sort:$sort'];
   // Tags: one or many (comma-separated) — they combine as an AND of includes.
   const tagList = String(q.get('tag') || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 8);
-  // Language: sub/dub comes from the local episode counts, not AniList, so a
-  // language-filtered page fetches a wider AniList slice and keeps the matches.
+  // Language: sub/dub comes from the local streaming catalogues, not AniList, so a
+  // language-filtered page has to pull a wider AniList slice and keep the matches.
   const lang = oneOf(q.get('lang'), ['sub', 'dub']);
   const filters = [
     ['search', 'q', 'String', search],
@@ -103,15 +122,60 @@ export async function browse(q) {
   const sort = oneOf(q.get('sort'), SORTS);
   vars.sort = sort ? [sort] : search ? ['SEARCH_MATCH', 'POPULARITY_DESC'] : ['POPULARITY_DESC'];
   decl.push('$sort:[MediaSort]');
-  const perPage = lang ? 90 : 30;
-  const d = await gql(`query(${decl.join(',')}){Page(page:$p,perPage:${perPage}){pageInfo{total currentPage hasNextPage}
-    media(${args.join(',')}){${CARD}}}}`, vars);
-  let media = d.Page.media;
-  if (lang) {
+  const perPage = 50;
+  // A dubbed title is a small minority of the catalogue, so one AniList page of
+  // 50 would leave a nearly empty screen. Pull a few pages at once and let the
+  // client carry on from where this one stopped.
+  const chunk = lang === 'dub' ? 3 : 1;
+  const query = `query(${decl.join(',')}){Page(page:$p,perPage:${perPage}){pageInfo{total currentPage hasNextPage}
+    media(${args.join(',')}){${CARD}}}}`;
+  const pages = await Promise.all(Array.from({ length: chunk }, (_, i) =>
+    gql(query, { ...vars, p: vars.p + i }).catch(() => null)));
+  const first = pages[0];
+  if (!first) throw new UpstreamError('AniList did not answer.', 502);
+  let media = pages.flatMap(p => p?.Page.media || []);
+  let langPending = 0;
+  const languageIndex = lang ? await dubIndexLoaded() : true;
+  if (lang === 'dub') {
+    // The dub index is the truth here: it is AllAnime's own list of everything
+    // that has an English dub. The per-title counts are the fallback for a show
+    // the index has not matched yet. A title nobody knows about is left out —
+    // a language filter that shows what it was asked not to show is worse than
+    // a short page — and its lookup is queued, so it turns up on the next pass.
+    ensureDubIndex();
     const snap = audioSnapshot(media.map(m => m.id));
-    media = media.filter(m => (m.id in snap ? (lang === 'dub' ? snap[m.id].dub : snap[m.id].sub) > 0 : true));
+    media = media.filter(m => {
+      if (hasDub(m)) return true;
+      const c = snap[m.id];
+      if (c) return c.dub > 0;
+      langPending++;
+      // With no catalogue at all, an unknown title is not proof that it has
+      // no dub. Keeping it is better than turning the whole filter into an
+      // empty page; a known zero is still respected.
+      return !languageIndex;
+    });
+  } else if (lang === 'sub') {
+    const snap = audioSnapshot(media.map(m => m.id));
+    media = media.filter(m => {
+      const c = snap[m.id];
+      // Japanese subs are the default; only a title known to have none is out.
+      return c ? c.sub > 0 : true;
+    });
   }
-  return { pageInfo: d.Page.pageInfo, media };
+  const info = first.Page.pageInfo;
+  const last = pages[chunk - 1]?.Page.pageInfo;
+  return {
+    pageInfo: {
+      // AniList's total counts every title, so it would be a lie once a
+      // language filter has thrown most of them out.
+      total: lang ? null : info.total,
+      currentPage: info.currentPage,
+      hasNextPage: !!last?.hasNextPage,
+      next: info.currentPage + chunk,
+    },
+    media,
+    langPending,
+  };
 }
 
 export async function suggest(q) {
@@ -131,13 +195,14 @@ export async function many(q) {
 
 export async function anime(q, [id]) {
   const d = await gql(`query($id:Int){Media(id:$id,type:ANIME){${CARD} idMal siteUrl status duration source favourites synonyms
-    startDate{year month day} endDate{year month day} trailer{id site thumbnail}
+    startDate{year month day} endDate{year month day}
     externalLinks{site url type color} streamingEpisodes{title thumbnail url site}
-    rankings{rank type allTime context} tags{name rank isMediaSpoiler}
-    relations{edges{relationType(version:2) node{id type format status title{romaji english} coverImage{medium color}}}}
+    rankings{rank type allTime context} tags{name rank isMediaSpoiler isAdult}
+    relations{edges{relationType(version:2) node{id type format status title{romaji english} coverImage{medium color} trailer{id site}}}}
     characters(perPage:12,sort:[ROLE,RELEVANCE]){edges{role node{id name{full} image{medium}} voiceActors(language:JAPANESE){name{full} image{medium}}}}
     recommendations(perPage:12,sort:RATING_DESC){nodes{mediaRecommendation{${MINI}}}}}}`, { id: int(id, 1, 1e7) }, 900);
   if (!d.Media) throw new UpstreamError('No anime has that id.', 404);
+  if (Array.isArray(d.Media.tags)) d.Media.tags = d.Media.tags.filter(safeTag);
   return d.Media;
 }
 

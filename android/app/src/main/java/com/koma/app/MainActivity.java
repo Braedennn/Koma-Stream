@@ -2,13 +2,8 @@ package com.koma.app;
 
 import android.app.Activity;
 import android.content.Context;
-import android.content.res.AssetManager;
 import android.graphics.Color;
 import android.media.AudioManager;
-import android.net.ConnectivityManager;
-import android.net.LinkAddress;
-import android.net.LinkProperties;
-import android.net.Network;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -35,39 +30,20 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.Inet4Address;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.ServerSocket;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
- * Koma on Android: start the native Rust server for the site and its API,
- * keep the Node runtime for the separate AniVault streaming sidecar, wait for
- * the site to answer, and show it in a WebView. Everything the page does
- * afterwards is the same as in a browser — no special bridge for the core
- * features.
+ * Koma on Android: start the Node runtime (which hosts the site and its
+ * streaming servers on the loopback), wait for the site to answer, and show it
+ * in a WebView. Everything the page does afterwards is the same as in a
+ * browser — no special bridge for the core features.
  */
 public class MainActivity extends Activity {
 
-  private static final int SITE_PORT_START = 4180;
-  private static final Pattern ANIVAULT_KEY = Pattern.compile(
-      "^ANIVAULT_API_KEY=(.+)$", Pattern.MULTILINE);
-
-  /* The native server is kept for the life of the app process. An Activity can
-     go away while the server keeps serving the loopback. */
-  private static Process komaServerProcess;
-  private static boolean anivaultSidecarStarted = false;
   private static WifiManager.MulticastLock roomMulticastLock;
 
   private WebView webView;
@@ -191,178 +167,21 @@ public class MainActivity extends Activity {
   }
 
   /**
-   * Copy the site, start the AniVault sidecar, then start the native Koma
-   * server. The copy and both startups stay off the UI thread.
+   * Start the Node runtime that hosts Koma and the AniVault streaming API.
    */
   private void startServers() {
-    new Thread(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          if (processRunning(komaServerProcess)) {
-            trace(MainActivity.this, "the native koma server is already running");
-            waitForSite();
-            return;
-          }
-
-          trace(MainActivity.this, "preparing the native koma server files");
-          prepareKomaAssets();
-
-          startAniVaultSidecar();
-          int anivaultPort = waitForAnivaultPort();
-          int sitePort = chooseSitePort(anivaultPort);
-          trace(MainActivity.this, "starting native koma server on " + sitePort
-              + " with anivault on " + anivaultPort);
-
-          startKomaServer(sitePort, anivaultPort);
-          writeSitePort(sitePort);
-          trace(MainActivity.this, "native koma server started, waiting for the site");
-          waitForSite();
-        } catch (Throwable t) {
-          traceThrowable(MainActivity.this, "the native koma server could not start", t);
-        }
-      }
-    }).start();
-  }
-
-  /**
-   * The packaged site is copied out of the APK once per APK update. The two
-   * directories are the public site and the writable data the Rust server
-   * uses for its language catalogues.
-   */
-  private void prepareKomaAssets() throws IOException {
-    File siteRoot = new File(getFilesDir(), "koma-site");
-    File publicDir = new File(siteRoot, "public");
-    File dataDir = new File(siteRoot, "server/data");
-    File marker = new File(siteRoot, ".assets-stamp");
-    String stamp = assetStamp();
-    String copiedStamp = readText(marker);
-
-    if (!publicDir.isDirectory() || !dataDir.isDirectory()
-        || copiedStamp == null || !copiedStamp.trim().equals(stamp)) {
-      deleteTree(publicDir);
-      deleteTree(dataDir);
-      copyAssetTree("koma-site/public", publicDir);
-      copyAssetTree("koma-site/server/data", dataDir);
-      writeText(marker, stamp);
-      trace(this, "native koma server assets copied");
-    }
-  }
-
-  /** Node remains only for the separate AniVault streaming API. */
-  private void startAniVaultSidecar() {
-    if (anivaultSidecarStarted) return;
-    try { new File(getFilesDir(), "koma-anivault.port").delete(); } catch (Exception ignored) { }
-    new RNNodeJsMobileModule(getApplicationContext()).startNodeProject("main.js");
-    anivaultSidecarStarted = true;
-    trace(this, "anivault node sidecar start requested");
-  }
-
-  /** Wait until the Node sidecar has chosen and reported its loopback port. */
-  private int waitForAnivaultPort() throws IOException {
-    for (int i = 0; i < 240; i++) { // a minute: the first asset copy takes a moment
-      int port = portFile("koma-anivault.port");
-      if (port > 0) return port;
-      try { Thread.sleep(250); } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new IOException("interrupted while waiting for the anivault sidecar", e);
-      }
-    }
-    throw new IOException("the anivault sidecar did not report a port");
-  }
-
-  /** Pick the first free loopback port at or above 4180. */
-  private int chooseSitePort(int anivaultPort) throws IOException {
-    for (int port = SITE_PORT_START; port < SITE_PORT_START + 100; port++) {
-      if (port == anivaultPort) continue;
-      if (isPortFree(port)) return port;
-    }
-    throw new IOException("no free koma site port at or above " + SITE_PORT_START);
-  }
-
-  private boolean isPortFree(int port) {
-    try (ServerSocket probe = new ServerSocket()) {
-      probe.setReuseAddress(false);
-      probe.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port));
-      return true;
-    } catch (IOException e) {
-      return false;
-    }
-  }
-
-  /**
-   * Start the packaged native server. Its output is drained on a daemon thread
-   * so a chatty server cannot fill a pipe and stop answering requests.
-   */
-  private void startKomaServer(int sitePort, int anivaultPort) throws IOException {
-    File server = new File(getApplicationInfo().nativeLibraryDir, "libkoma_server.so");
-    if (!server.isFile()) {
-      throw new IOException("native koma server is missing: " + server.getAbsolutePath());
-    }
-    if (!server.canExecute() && !server.setExecutable(true, false)) {
-      throw new IOException("native koma server is not executable: " + server.getAbsolutePath());
-    }
-
-    ProcessBuilder builder = new ProcessBuilder(server.getAbsolutePath());
-    builder.redirectErrorStream(true);
-    builder.environment().put("KOMA_PUBLIC_DIR",
-        new File(getFilesDir(), "koma-site/public").getAbsolutePath());
-    builder.environment().put("KOMA_DATA_DIR",
-        new File(getFilesDir(), "koma-site/server/data").getAbsolutePath());
-    builder.environment().put("KOMA_ANIVAULT_KEY", anivaultKey());
-    builder.environment().put("KOMA_ANIVAULT_URL", "http://127.0.0.1:" + anivaultPort);
-    builder.environment().put("KOMA_VERSION", BuildConfig.VERSION_NAME);
-    String lanAddress = activeLanAddress();
-    if (!lanAddress.isEmpty()) {
-      builder.environment().put("KOMA_LAN_ADDRESS", lanAddress);
-    }
-    builder.environment().put("PORT", String.valueOf(sitePort));
-    builder.environment().put("HOST", "127.0.0.1");
-
-    Process process = builder.start();
-    komaServerProcess = process;
-    logKomaServerOutput(getApplicationContext(), process);
-  }
-
-  /**
-   * The address of the network other devices can reach this one on. Android's
-   * NDK does not expose getifaddrs at the supported API level, so the app
-   * finds the active network and hands its IPv4 address to the Rust server.
-   */
-  private String activeLanAddress() {
     try {
-      ConnectivityManager manager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-      if (manager != null) {
-        Network network = manager.getActiveNetwork();
-        LinkProperties properties = manager.getLinkProperties(network);
-        if (properties != null) {
-          for (LinkAddress link : properties.getLinkAddresses()) {
-            InetAddress address = link.getAddress();
-            if (address instanceof Inet4Address && !address.isLoopbackAddress()) {
-              return address.getHostAddress();
-            }
-          }
-        }
-      }
-    } catch (Exception ignored) { }
-
-    try {
-      java.util.Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
-      while (interfaces != null && interfaces.hasMoreElements()) {
-        java.net.NetworkInterface network = interfaces.nextElement();
-        String name = network.getName().toLowerCase(java.util.Locale.US);
-        if (network.isLoopback() || !network.isUp()
-            || name.matches(".*(rmnet|ccmni|tun|ppp).*")) continue;
-        java.util.Enumeration<InetAddress> addresses = network.getInetAddresses();
-        while (addresses.hasMoreElements()) {
-          InetAddress address = addresses.nextElement();
-          if (address instanceof Inet4Address && !address.isLoopbackAddress()) {
-            return address.getHostAddress();
-          }
-        }
-      }
-    } catch (Exception ignored) { }
-    return "";
+      trace(this, "starting node runtime");
+      // The port the site ends up on belongs to this run: the old note is
+      // cleared so the app waits for the new one.
+      try { new File(getFilesDir(), "koma-site.port").delete(); } catch (Exception ignored) { }
+      new RNNodeJsMobileModule(getApplicationContext()).startNodeProject("main.js");
+      trace(this, "node start requested, waiting for the site");
+    } catch (Throwable t) {
+      traceThrowable(this, "node start threw", t);
+      throw t instanceof RuntimeException ? (RuntimeException) t : new RuntimeException(t);
+    }
+    waitForSite();
   }
 
   /** Android filters multicast packets from Wi-Fi unless the app holds this lock. */
@@ -376,187 +195,52 @@ public class MainActivity extends Activity {
     } catch (Exception ignored) { }
   }
 
-  private static void logKomaServerOutput(final Context context, final Process process) {
-    Thread reader = new Thread(new Runnable() {
+  /** Poll the site until the servers answer, then load it. */
+  private void waitForSite() {
+    new Thread(new Runnable() {
       @Override
       public void run() {
-        try (BufferedReader r = new BufferedReader(
-            new InputStreamReader(process.getInputStream()))) {
-          String line;
-          while ((line = r.readLine()) != null) {
-            trace(context, "koma-server: " + line);
+        for (int i = 0; i < 120; i++) { // a minute: the first asset copy takes a moment
+          int port = sitePort();
+          if (port > 0 && pingSite(port)) {
+            final int p = port;
+            runOnUiThread(new Runnable() {
+              @Override
+              public void run() {
+                if (webView == null) return;
+                trace(MainActivity.this, "loading the site in the webview");
+                // The television app opens the site in television mode, so the
+                // layout and the remote's navigation are the television's.
+                webView.loadUrl("http://127.0.0.1:" + p + (BuildConfig.IS_TV ? "/?tv=1" : "/"));
+              }
+            });
+            return;
           }
-        } catch (Exception e) {
-          if (processRunning(process)) {
-            traceThrowable(context, "koma-server output stopped", e);
+          try { Thread.sleep(500); } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
           }
         }
+        trace(MainActivity.this, "the site never answered after a minute");
       }
-    });
-    reader.setDaemon(true);
-    reader.start();
-  }
-
-  /** Poll the site until the native server answers, then load it. */
-  private boolean waitForSite() {
-    for (int i = 0; i < 120; i++) { // a minute: the first asset copy takes a moment
-      int port = sitePort();
-      if (port > 0 && pingSite(port)) {
-        final int p = port;
-        runOnUiThread(new Runnable() {
-          @Override
-          public void run() {
-            if (webView == null) return;
-            trace(MainActivity.this, "loading the site in the webview");
-            // The television app opens the site in television mode, so the
-            // layout and the remote's navigation are the television's.
-            webView.loadUrl("http://127.0.0.1:" + p + (BuildConfig.IS_TV ? "/?tv=1" : "/"));
-          }
-        });
-        return true;
-      }
-      if (komaServerProcess != null && !processRunning(komaServerProcess)) {
-        trace(this, "the native koma server exited with code " + processExit(komaServerProcess));
-        return false;
-      }
-      try { Thread.sleep(500); } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        return false;
-      }
-    }
-    trace(this, "the site never answered after a minute");
-    return false;
+    }).start();
   }
 
   /**
-   * The port the native site server took. The phone app and the television app
-   * can be installed side by side, so the app picks the first free port at or
-   * above 4180 and writes it down here.
+   * The port the site took. The phone app and the television app can be
+   * installed side by side, so they cannot both have 4180: the Node runtime
+   * picks the first free pair and writes the port down here.
    */
   private int sitePort() {
-    return portFile("koma-site.port");
-  }
-
-  private int portFile(String name) {
-    File f = new File(getFilesDir(), name);
+    File f = new File(getFilesDir(), "koma-site.port");
     if (!f.exists()) return 0;
-    try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(f)))) {
+    try (BufferedReader r = new BufferedReader(new InputStreamReader(new java.io.FileInputStream(f)))) {
       String line = r.readLine();
       int p = Integer.parseInt(line.trim());
       return p > 0 ? p : 0;
     } catch (Exception e) {
       return 0;
     }
-  }
-
-  private void writeSitePort(int port) throws IOException {
-    writeText(new File(getFilesDir(), "koma-site.port"), port + "\n");
-  }
-
-  private String assetStamp() {
-    try {
-      android.content.pm.PackageInfo info = getPackageManager()
-          .getPackageInfo(getPackageName(), 0);
-      return info.lastUpdateTime + "-" + info.versionName;
-    } catch (Exception e) {
-      return BuildConfig.VERSION_NAME;
-    }
-  }
-
-  private void copyAssetTree(String assetPath, File target) throws IOException {
-    AssetManager assets = getAssets();
-    String[] children = assets.list(assetPath);
-    if (children == null || children.length == 0) {
-      copyAssetFile(assetPath, target);
-      return;
-    }
-    if (!target.isDirectory() && !target.mkdirs()) {
-      throw new IOException("could not create " + target.getAbsolutePath());
-    }
-    for (String child : children) {
-      copyAssetTree(assetPath + "/" + child, new File(target, child));
-    }
-  }
-
-  private void copyAssetFile(String assetPath, File target) throws IOException {
-    File parent = target.getParentFile();
-    if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
-      throw new IOException("could not create " + parent.getAbsolutePath());
-    }
-    try (InputStream in = getAssets().open(assetPath);
-         FileOutputStream out = new FileOutputStream(target)) {
-      byte[] buffer = new byte[16384];
-      int n;
-      while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
-    }
-  }
-
-  private String readAssetText(String assetPath) throws IOException {
-    try (BufferedReader r = new BufferedReader(
-        new InputStreamReader(getAssets().open(assetPath)))) {
-      StringBuilder text = new StringBuilder();
-      String line;
-      while ((line = r.readLine()) != null) text.append(line).append('\n');
-      return text.toString();
-    }
-  }
-
-  private String anivaultKey() throws IOException {
-    String env = readAssetText("nodejs-project/anivault.env");
-    Matcher matcher = ANIVAULT_KEY.matcher(env);
-    if (!matcher.find()) throw new IOException("no ANIVAULT_API_KEY in the packaged assets");
-    return matcher.group(1).trim();
-  }
-
-  private String readText(File file) {
-    if (!file.exists()) return null;
-    try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(file)))) {
-      StringBuilder text = new StringBuilder();
-      String line;
-      while ((line = r.readLine()) != null) text.append(line).append('\n');
-      return text.toString();
-    } catch (Exception e) {
-      return null;
-    }
-  }
-
-  private void writeText(File file, String text) throws IOException {
-    File parent = file.getParentFile();
-    if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
-      throw new IOException("could not create " + parent.getAbsolutePath());
-    }
-    try (FileOutputStream out = new FileOutputStream(file)) {
-      out.write(text.getBytes(StandardCharsets.UTF_8));
-    }
-  }
-
-  private static boolean processRunning(Process process) {
-    if (process == null) return false;
-    try {
-      process.exitValue();
-      return false;
-    } catch (IllegalThreadStateException e) {
-      return true;
-    }
-  }
-
-  private static int processExit(Process process) {
-    try {
-      return process.exitValue();
-    } catch (IllegalThreadStateException e) {
-      return -1;
-    }
-  }
-
-  private static void deleteTree(File file) {
-    if (file == null || !file.exists()) return;
-    if (file.isDirectory()) {
-      File[] children = file.listFiles();
-      if (children != null) {
-        for (File child : children) deleteTree(child);
-      }
-    }
-    file.delete();
   }
 
   private boolean pingSite(int port) {
@@ -852,7 +536,7 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onDestroy() {
-    // The native server keeps running with the app process; the WebView goes.
+    // The Node servers keep running with the app process; the WebView goes.
     if (roomMulticastLock != null && roomMulticastLock.isHeld()) {
       try { roomMulticastLock.release(); } catch (Exception ignored) { }
       roomMulticastLock = null;

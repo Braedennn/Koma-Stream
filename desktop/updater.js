@@ -7,9 +7,11 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const { Readable } = require('node:stream');
 
-/** 1.0.10 > 1.0.9, 1.1 > 1.0.9 — dotted numeric compare, missing parts count as 0. */
+/** 1.0.10 > 1.0.9, 1.1 > 1.0.9 — dotted numeric compare, missing parts count as 0.
+ *  A leading "v" is ignored, so a tag can be compared as it is. */
 function newerVersion(a, b) {
-  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+  const parts = v => String(v).replace(/^v/i, '').split('.').map(Number);
+  const pa = parts(a), pb = parts(b);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const d = (pa[i] || 0) - (pb[i] || 0);
     if (d) return d > 0;
@@ -31,7 +33,7 @@ function sweep(dir) {
 /** Stream the installer to dir as Koma-Setup.exe.part, reporting 0-100 progress, then
  *  rename it into place. Resolves with the path it can be run from, rejects with the
  *  network/disk error otherwise. */
-async function download(url, { dir, log, onPct = () => {} }) {
+async function download(url, { dir, log = () => {}, onPct = () => {} }) {
   fs.mkdirSync(dir, { recursive: true });
   const part = path.join(dir, 'Koma-Setup.exe.part');
   const dest = path.join(dir, 'Koma-Setup.exe');
@@ -81,14 +83,25 @@ const dropAll = p => { try { fs.unlinkSync(p); } catch { /* fine */ } };
 /** Hand over: open the installer and leave the stage AT ONCE. The installer
  *  overwrites the very files this app is running from, so anything still open when
  *  it starts copying is what makes an update die halfway. Deliberately dumb and
- *  separate from download: nothing here runs until the user's explicit "Update now"
- *  click. */
-function install(exePath, { quitAfter, spawnImpl, log = () => {} }) {
-  log('opening the installer…');
-  const sp = spawnImpl || ((cmd, args, opts) => cp.spawn(cmd, args, opts));
-  sp(exePath, [], { detached: true, stdio: 'ignore' }).unref();
+ *  separate from download: nothing here runs until the app decides to update. */
+function install(exePath, { quitAfter, spawnImpl, log = () => {}, args = [] }) {
+  log(`opening the installer${args.length ? ` (${args.join(' ')})` : ''}…`);
+  const sp = spawnImpl || ((cmd, a, opts) => cp.spawn(cmd, a, opts));
+  sp(exePath, args, { detached: true, stdio: 'ignore' }).unref();
   if (quitAfter) setImmediate(quitAfter); // the app goes now — not in a couple of seconds
   return exePath;
 }
 
-module.exports = { newerVersion, sweep, download, install };
+/* The installer kills the app and everything the app started — that is how the
+ * servers get out of the way of the copy. But the app is what starts the
+ * installer, so the installer is standing inside that very tree: a tree kill
+ * would take the installer down with it, and the update would die before it
+ * started. So the app says where the installer came from, and the installer
+ * waits for the app to close on its own instead of killing it.
+ *
+ * /relaunch — start Koma again when the install is done.
+ * /fromapp  — the app started this installer; do not kill its tree. */
+const fromApp = () => ['/fromapp'];
+const silentRelaunch = () => ['/S', '/relaunch', '/fromapp'];
+
+module.exports = { newerVersion, sweep, download, install, fromApp, silentRelaunch };

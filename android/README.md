@@ -1,17 +1,15 @@
 # Koma for Android (Phase 1 skeleton) — WORKING
 
-The app is a WebView pointed at Koma's own server running inside the app. The
-primary Koma server is the native Rust executable `libkoma_server.so`; Android
-starts it from `ApplicationInfo.nativeLibraryDir` on the first free loopback
-port at or above 4180. The embedded Node runtime (nodejs-mobile 18.20.4) is
-kept only for the separate AniVault streaming API, which Koma reaches over a
-second loopback port.
+The app is a WebView pointed at Koma's own server running inside the app. One
+embedded Node runtime (nodejs-mobile 18.20.4) hosts both servers — Koma on
+`127.0.0.1:4180` (what the WebView loads) and the AniVault streaming API on
+`127.0.0.1:4181` (what Koma proxies to) — exactly the desktop architecture with
+two loopback ports instead of two processes.
 
-Verified end to end on LDPlayer 9 (Android 14, x86_64) with the earlier Node
-server architecture: app opens, the local servers boot, the site renders, and
-the API answers. The native Rust server has not been built or tested yet. Not
-yet verified on device: playback (the user's next test), dub badges (Python
-not ported), watch-together host, the updater.
+Verified end to end on LDPlayer 9 (Android 14, x86_64): app opens, Node boots
+both servers, the site renders, the API answers. Not yet verified on device:
+playback (the user's next test), dub badges (Python not ported), watch-together
+host, the updater.
 
 ## The five crashes between "closes instantly" and "works", in the order they fell
 
@@ -58,11 +56,10 @@ adb forward tcp:14180 tcp:<port> # use the port in files/koma-site.port
 it onto the LDPlayer window) and open it; Android asks to allow installs from
 that source once. The APK is signed with a debug key, so it installs anywhere.
 
-On first launch the app copies the Node sidecar and the Koma site out of the
-APK (a few seconds), starts the native Rust server and the AniVault sidecar,
-then opens the site. From there it is the same Koma: browse, search, play.
-Progress, library and preferences live in the WebView's storage and survive
-updates, not uninstalls — Settings -> Data backup is the migration path.
+On first launch the app copies the Node project out of the APK (a few seconds),
+starts the servers, then opens the site. From there it is the same Koma: browse,
+search, play. Progress, library and preferences live in the WebView's storage and
+survive updates, not uninstalls — Settings -> Data backup is the migration path.
 
 ## What is known-missing in this build
 
@@ -76,20 +73,13 @@ updates, not uninstalls — Settings -> Data backup is the migration path.
 
 ## Rebuild
 
-1. Build the Rust server for the three Android targets. Cargo's release output
-   is expected at `rust-backend/target/<target-triple>/release/koma-server` (or
-   `libkoma_server.so`) for `aarch64-linux-android`,
-   `armv7-linux-androideabi`, and `x86_64-linux-android`. The sync script
-   installs it as `libkoma_server.so`. Set `KOMA_RUST_TARGET_DIR` when Cargo
-   uses a custom target directory.
-2. `node sync-assets.mjs` — copies those Rust binaries into
-   `app/src/main/jniLibs/<abi>/`, assembles the static site and catalogue data
-   under `app/src/main/assets/koma-site/`, and assembles the Node-only AniVault
-   sidecar under `app/src/main/assets/nodejs-project/`. The node-project walk
-   mirrors aapt2's ignore rules exactly (see crash 3 above) — rebuild the
-   desktop `dist` first when AniVault's dependency tree changes, so the packaged
-   copy carries the fix.
-3. Build:
+1. `node sync-assets.mjs` — assembles `app/src/main/assets/nodejs-project` from
+   the repo (`server.js`, `server/`, `public/`, the packaged AniVault `dist` +
+   `node_modules`, the API key as `anivault.env`), then writes `dir.list` /
+   `file.list`. The walk mirrors aapt2's ignore rules exactly (see crash 3
+   above) — rebuild the desktop `dist` first when AniVault's dependency tree
+   changes, so the packaged copy carries the fix.
+2. Build:
    ```powershell
    $env:JAVA_HOME   = "E:\WebsiteAnime\.data\android\jdk-21.0.13+9"
    $env:ANDROID_HOME = "E:\WebsiteAnime\.data\android\sdk"
@@ -113,7 +103,6 @@ Gradle 8.7.
   removed; the package and class names are load-bearing — the JNI symbols in
   `native-lib.cpp` are bound to them).
 - `app/src/main/cpp/` — that JNI layer + node headers; `jniLibs/` — the three
-  prebuilt `libnode.so` runtimes and the Rust server binaries.
-- `node-src/` — the starter Node runs (`main.js`: the AniVault sidecar only).
-- `sync-assets.mjs` — assembles the APK's Rust binaries, site assets, and Node
-  sidecar from the repo.
+  prebuilt `libnode.so` runtimes.
+- `node-src/` — the starter Node runs (`main.js`: env, then both servers).
+- `sync-assets.mjs` — assembles the APK's Node project from the repo.

@@ -170,7 +170,21 @@ export async function findAnikotoSlug(title: string): Promise<string | null> {
 
   const allResults: AnikotoSearchResult[] = [];
   for (const variant of variants) {
-    const results = await searchAnikoto(variant).catch(() => []);
+    let results: AnikotoSearchResult[] = [];
+    try {
+      results = await searchAnikoto(variant);
+    } catch (err: any) {
+      // A site that cannot be reached will not answer for the next variant
+      // either, and every try costs the full timeout - so the search ends
+      // here instead of burning minutes on a network that filters us.
+      // A site that answered and refused is a different thing: the next
+      // variant may still work.
+      if (!err?.response) {
+        log('findAnikotoSlug: the site could not be reached', { variant, error: errInfo(err) });
+        return null;
+      }
+      log('findAnikotoSlug: the site refused the search', { variant, status: err?.response?.status });
+    }
     allResults.push(...results);
     if (results.some((result) => scoreTitle(title, result.title) >= 80)) break;
   }
@@ -587,6 +601,27 @@ async function doMegacloud(embedUrl: string, html: string, referer: string, serv
   }
 }
 
+/**
+ * A URL the player can actually load, or null.
+ *
+ * Some mirrors answer with the site's own player route — `https://megaplay.buzz/?token=…`
+ * with the episode path in the fragment — instead of the direct playlist on
+ * its CDN. The fragment never reaches the server, so a fetch of that URL
+ * returns the site's HTML, not a playlist, and the player is left with a
+ * spinner and an error. Such a URL is refused here, so the next mirror of the
+ * episode is tried instead of handing the viewer a link that cannot play.
+ */
+function playablePlaylistUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (!url.pathname || url.pathname === '/') return null; // the player page, not a file
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 // ── Megaplay (megaplay.buzz / vidwish.live / vidtube.site mirrors) ──
 // ── Megaplay 'enc' decryption + URL signing ──
 // megaplay.buzz's getSources endpoint stopped returning a plaintext
@@ -740,12 +775,29 @@ function signMegaPlayUrl(value: string | null, signingKey: string | null): strin
 // present, the separate bundle responsible for signing playback URLs. Best
 // effort: any fetch/parse failure just means decryption/signing gets skipped
 // and the caller falls back to whatever plaintext field is already present.
+// The megaplay player page's scripts, kept per host for a few minutes: they
+// carry the decryption key and the signing key, and they do not change while
+// a show is being watched.
+const scriptCache = new Map<string, { at: number; script: string | null; signingKey: string | null }>();
+const SCRIPT_TTL = 5 * 60e3;
+
 async function getMegaplayScripts(
   host: string,
   html: string,
-  referer: string
+  referer: string,
+  fresh = false
 ): Promise<{ script: string | null; signingKey: string | null }> {
   try {
+    // The player page carries a dozen scripts, and the two that matter (the
+    // one that decrypts the source and the one that signs it) are only found
+    // by reading them. That is 600KB and a second and a half on every
+    // resolution — and the page's scripts do not change while a show is being
+    // watched. They are kept for a few minutes; a resolution that is asked
+    // for fresh (because a signed link was refused) goes to the page again.
+    if (!fresh) {
+      const hit = scriptCache.get(host);
+      if (hit && Date.now() - hit.at < SCRIPT_TTL) return { script: hit.script, signingKey: hit.signingKey };
+    }
     const origin = `https://${host}/`;
     const scriptUrls = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map((m) => new URL(m[1], origin).href);
     const contents = await Promise.all(
@@ -759,6 +811,7 @@ async function getMegaplayScripts(
     const script = contents.find((value): value is string => typeof value === 'string' && /getSources/i.test(value) && /AES-CBC/i.test(value)) ?? null;
     const signingScript = contents.find((value): value is string => typeof value === 'string' && value.includes('[a-f0-9]{32}') && value.includes('token=')) ?? null;
     const signingKey = signingScript ? getMegaPlaySigningKey(signingScript) : null;
+    scriptCache.set(host, { at: Date.now(), script, signingKey });
     return { script, signingKey };
   } catch (err) {
     log('megaplay: fetching client scripts for enc-decryption threw', errInfo(err));
@@ -766,7 +819,7 @@ async function getMegaplayScripts(
   }
 }
 
-async function doMegaplay(host: string, html: string, referer: string, serverName: string): Promise<AnikotoStream | null> {
+async function doMegaplay(host: string, html: string, referer: string, serverName: string, fresh = false): Promise<AnikotoStream | null> {
   const match = html.match(/<title>File ([0-9]+)/);
   if (!match) {
     log('megaplay: no "<title>File N" match — page may not be a megaplay player', { host, htmlSnippet: html.slice(0, 300) });
@@ -779,7 +832,6 @@ async function doMegaplay(host: string, html: string, referer: string, serverNam
       headers: { ...DEFAULT_HEADERS, 'X-Requested-With': 'XMLHttpRequest', Referer: referer },
       timeout: 8000,
     });
-
     let m3u8: string | null | undefined = data?.sources?.file;
     const subtitles: AnikotoSubtitle[] = (data?.tracks || [])
       .filter((t: any) => t?.file)
@@ -789,7 +841,7 @@ async function doMegaplay(host: string, html: string, referer: string, serverNam
     // instead send an `enc` blob — decrypt it, then HMAC-sign the resulting
     // URL if the site's client script requires a `token=` param.
     if (!m3u8 && data?.enc) {
-      const { script, signingKey } = await getMegaplayScripts(host, html, referer);
+      const { script, signingKey } = await getMegaplayScripts(host, html, referer, fresh);
       if (script) {
         const decrypted = decryptMegaPlaySource(data.enc, script);
         if (decrypted) {
@@ -830,6 +882,11 @@ async function doMegaplay(host: string, html: string, referer: string, serverNam
       log('megaplay: getSources returned no sources.file', { host, id, data });
       return null;
     }
+    // The site's player route is not a playlist — the next mirror is tried.
+    if (!playablePlaylistUrl(m3u8)) {
+      log('megaplay: the answer is the player page, not a playlist — refusing it', { host, id, m3u8 });
+      return null;
+    }
     log('megaplay: resolved', { host, id, m3u8 });
     return { embedUrl: `https://${host}/`, m3u8, referer, subtitles, serverName, type: 'hls',
       intro: data?.intro ?? null, outro: data?.outro ?? null };
@@ -842,7 +899,7 @@ async function doMegaplay(host: string, html: string, referer: string, serverNam
 // ── Generic chain: follow the embed page (and any nested iframe) until it
 //    resolves to a known megacloud/megaplay host, mirroring anikoto's own
 //    extractStreamUrl chain so domain rotations stay handled the same way.
-async function resolveAnikotoEmbed(embedUrl: string, serverName: string): Promise<AnikotoStream | null> {
+async function resolveAnikotoEmbed(embedUrl: string, serverName: string, fresh = false): Promise<AnikotoStream | null> {
   try {
     const hostname = new URL(embedUrl).hostname;
 
@@ -851,7 +908,7 @@ async function resolveAnikotoEmbed(embedUrl: string, serverName: string): Promis
       const host = new URL(url).host;
       const referer = `https://${host}/`;
       const { data: html } = await axios.get<string>(url, { headers: { ...DEFAULT_HEADERS, Referer: referer }, timeout: 8000 });
-      return doMegaplay(host, html, referer, serverName);
+      return doMegaplay(host, html, referer, serverName, fresh);
     }
 
     if (hostname.includes('megacloud.blog')) {
@@ -864,7 +921,7 @@ async function resolveAnikotoEmbed(embedUrl: string, serverName: string): Promis
       const host = new URL(embedUrl).host;
       const referer = `https://${host}/`;
       const { data: html } = await axios.get<string>(embedUrl, { headers: { ...DEFAULT_HEADERS, Referer: referer }, timeout: 8000 });
-      return doMegaplay(host, html, referer, serverName);
+      return doMegaplay(host, html, referer, serverName, fresh);
     }
 
     // Unknown host — follow one redirect hop via an <iframe> if present, then give up.
@@ -900,7 +957,7 @@ async function resolveAnikotoEmbed(embedUrl: string, serverName: string): Promis
 
       const finalHost = new URL(currentUrl).hostname;
       if (finalHost.includes('megaplay.buzz') || finalHost.includes('vidwish.live') || finalHost.includes('vidtube.site')) {
-        return doMegaplay(new URL(currentUrl).host, html, `https://${new URL(currentUrl).host}/`, serverName);
+        return doMegaplay(new URL(currentUrl).host, html, `https://${new URL(currentUrl).host}/`, serverName, fresh);
       }
       if (finalHost.includes('megacloud.blog')) {
         return doMegacloud(currentUrl, html, `https://${new URL(currentUrl).host}/`, serverName);
@@ -916,7 +973,7 @@ async function resolveAnikotoEmbed(embedUrl: string, serverName: string): Promis
   }
 }
 
-export async function getAnikotoEmbedUrl(sourceId: string): Promise<AnikotoStream | null> {
+export async function getAnikotoEmbedUrl(sourceId: string, fresh = false): Promise<AnikotoStream | null> {
   const parts = sourceId.split('::');
 
   if (parts[0] === 'kiwi') {
@@ -967,9 +1024,15 @@ export async function getAnikotoEmbedUrl(sourceId: string): Promise<AnikotoStrea
       else log('getAnikotoEmbedUrl: vidstream path failed, falling back to standard chain', { serverName, embedUrl });
     }
     if (!result) {
-      result = await resolveAnikotoEmbed(embedUrl, serverName);
+      result = await resolveAnikotoEmbed(embedUrl, serverName, fresh);
     }
     if (!result) log('getAnikotoEmbedUrl: all extraction paths failed', { serverName, embedUrl });
+    // A player route is a page, not a playlist: it cannot be played, and the
+    // next mirror of the episode can.
+    if (result && !playablePlaylistUrl(result.m3u8)) {
+      log('getAnikotoEmbedUrl: the answer is the player page, not a playlist — refusing it', { serverName, embedUrl, m3u8: result.m3u8 });
+      return null;
+    }
     return result;
   } catch (err) {
     log('getAnikotoEmbedUrl: /ajax/server?get= threw', { serverName, linkId, svId, ...errInfo(err) });

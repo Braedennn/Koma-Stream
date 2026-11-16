@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import * as api from './server/api.js';
 import { proxyJson, proxyMedia, ping } from './server/streaming.js';
 import { audioCounts } from './server/audio.js';
+import { ensureDubIndex } from './server/dubindex.js';
+import { handleRoom, lanAddress, roomInfo, setLanHandler } from './server/room.js';
 import { spawn } from 'node:child_process';
 
 if (typeof fetch !== 'function') {
@@ -17,6 +19,9 @@ if (typeof fetch !== 'function') {
 
 const PORT = Number(process.env.PORT) || 4000;
 const HOST = process.env.HOST || '0.0.0.0';
+// The app shell passes its own version, so /api/koma can say which build is
+// answering. Standalone, it says "dev".
+const VERSION = process.env.KOMA_VERSION || 'dev';
 const PUBLIC = fileURLToPath(new URL('./public/', import.meta.url));
 const gzipAsync = promisify(gzip);
 
@@ -25,7 +30,7 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
   '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8',
 };
-const PAGES = /^\/(?:anime\/\d+|watch\/\d+|browse|schedule|list|auth\/anilist)?\/?$/;
+const PAGES = /^\/(?:anime\/\d+|watch\/\d+|browse|schedule|list|auth\/anilist|join)?\/?$/;
 const API = [
   [/^\/api\/home$/, api.home],
   [/^\/api\/genres$/, api.genres],
@@ -46,7 +51,9 @@ const SECURITY = {
       "font-src https://fonts.gstatic.com", "img-src 'self' data: https:",
       // api.github.com is the release feed the footer's version line reads in a
       // plain browser tab (inside the app the shell asks GitHub itself).
-      "connect-src 'self' https://graphql.anilist.co https://api.github.com",
+      // http://*:* is the local network: a watch-together session talks to the
+      // host's own Koma server, wherever it sits on the Wi-Fi.
+      "connect-src 'self' http://*:* https://graphql.anilist.co https://api.github.com",
       "media-src 'self' blob:", "worker-src 'self' blob:", 'frame-src https:', "base-uri 'self'", "form-action 'self'",
     ].join('; '),
 };
@@ -89,11 +96,34 @@ async function sendFile(req, res, file, status = 200) {
   res.end(req.method === 'HEAD' ? undefined : body);
 }
 
-async function handle(req, res) {
+async function handle(req, res, { lan = false } = {}) {
   const url = new URL(req.url, 'http://localhost');
   const path = url.pathname;
 
+  // The network door only answers for sessions: the room's API and the
+  // invite page. The rest of Koma stays on the loopback.
+  if (lan && !path.startsWith('/api/room/') && !/^\/join\/[A-Za-z0-9]{4,10}\/?$/.test(path)) {
+    return send(req, res, 404, 'Not found', TYPES['.txt']);
+  }
+
   if (path.startsWith('/api/')) {
+    // Watch-together rooms: the host's server is talked to from another
+    // machine, so these take POST and answer with CORS headers.
+    if (path.startsWith('/api/room/')) {
+      if (req.method === 'OPTIONS') {
+        return send(req, res, 204, '', TYPES['.txt'], {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'content-type',
+          'Access-Control-Max-Age': '600',
+        });
+      }
+      try { return await handleRoom(req, res, path, url, { lan }); }
+      catch (err) {
+        console.error(`[room] ${path}: ${err.message}`);
+        return send(req, res, 500, JSON.stringify({ error: 'The room could not answer.' }), TYPES['.json'], { 'Access-Control-Allow-Origin': '*' });
+      }
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') return send(req, res, 405, '{"error":"Use GET."}', TYPES['.json'], { Allow: 'GET, HEAD' });
     // Streaming-server passthrough routes come before the JSON API table.
     if (/^\/api\/proxy\/(hls|video|subtitle)$/.test(path)) return proxyMedia(req, res, path, url.search);
@@ -101,6 +131,12 @@ async function handle(req, res) {
     if (path === '/api/stream-status') {
       const ok = await ping().catch(() => false);
       return send(req, res, ok ? 200 : 503, JSON.stringify({ ok }), TYPES['.json'], { 'Cache-Control': 'no-store' });
+    }
+    // Who is answering on this port? The app shell asks this before it reuses
+    // a port, so a program that happens to sit on 4000 is never mistaken for
+    // Koma (it would answer 404 for everything, and the app would look broken).
+    if (path === '/api/koma') {
+      return send(req, res, 200, JSON.stringify({ app: 'koma', version: VERSION }), TYPES['.json'], { 'Cache-Control': 'no-store' });
     }
     if (path === '/api/audio') {
       const data = await audioCounts(url.searchParams.get('ids'));
@@ -119,6 +155,36 @@ async function handle(req, res) {
   }
 
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(req, res, 405, 'Method not allowed', TYPES['.txt'], { Allow: 'GET, HEAD' });
+
+  // A session invite: /join/CODE on the host's machine. It hands the viewer
+  // over to their own Koma (so their video keeps streaming from their own
+  // server) and carries the host's address along.
+  const invite = path.match(/^\/join\/([A-Za-z0-9]{4,10})\/?$/);
+  if (invite) {
+    const code = invite[1].toUpperCase();
+    const local = `http://127.0.0.1:${PORT}/join?code=${code}&host=${encodeURIComponent(lanAddress())}&port=${PORT}`;
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Joining a Koma session…</title>
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      <style>body{font:15px/1.65 system-ui,-apple-system,Segoe UI,sans-serif;background:#0b0c10;color:#e8e9ee;display:grid;place-items:center;height:100vh;margin:0}
+      main{max-width:36ch;text-align:center}h1{font-size:19px;margin:0 0 8px}b{letter-spacing:.08em}a{color:#9db4ff}
+      p{color:#a4a7b4}</style>
+      </head><body><main><h1>Opening Koma…</h1><p id="say">Taking you to the session <b>${code}</b>.</p>
+      <p id="alt" hidden>If Koma isn’t running on this machine, open it, choose <b>Watch together → Join a session</b> and type the code <b>${code}</b>.</p>
+      </main><script>
+      (function(){
+        var done=false;
+        function go(){ if(done) return; done=true; location.replace(${JSON.stringify(local)}); }
+        try { fetch('http://127.0.0.1:${PORT}/api/stream-status',{mode:'no-cors'}).then(go).catch(fail); } catch(e){ fail(); }
+        setTimeout(go, 2500); setTimeout(fail, 1500);
+        function fail(){ if(done) return; done=true; document.getElementById('say').textContent='Koma is not running on this machine.'; document.getElementById('alt').hidden=false; }
+      })();
+      </script></body></html>`;
+    return send(req, res, 200, html, 'text/html; charset=utf-8', {
+      // This page stands alone: it has one inline script and one inline style.
+      'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src http://127.0.0.1:*",
+    });
+  }
+
   if (PAGES.test(path)) return sendFile(req, res, join(PUBLIC, 'index.html'));
 
   let file;
@@ -146,6 +212,17 @@ const server = http.createServer((req, res) => {
   });
 });
 
+// The app's own server listens on the loopback. A session needs a way in
+// from the network, so the room opens a door of its own while it lasts.
+const LOOPBACK_ONLY = /^127\.|^localhost$|^\[?::1\]?$/.test(HOST);
+if (LOOPBACK_ONLY) setLanHandler((req, res) => {
+  handle(req, res, { lan: true }).catch(err => {
+    console.error(err);
+    if (!res.headersSent) send(req, res, 500, 'Server error', TYPES['.txt']).catch(() => res.end());
+    else res.end();
+  });
+});
+
 server.on('error', err => {
   if (err.code === 'EADDRINUSE') console.error(`Port ${PORT} is already in use. Close the other program or run with a different port, e.g. PORT=3001.`);
   else console.error(err);
@@ -154,8 +231,11 @@ server.on('error', err => {
 
 server.listen(PORT, HOST, () => {
   const url = `http://localhost:${PORT}`;
+  const room = roomInfo();
   console.log(`Koma is running at ${url}  (press Ctrl+C to stop)`);
+  console.log(`Watch together: sessions are reachable at http://${room.lan}:${PORT} (code beacon on UDP ${room.beacon})`);
   api.home().catch(() => {}); // warm the AniList cache so the first visit is instant
+  ensureDubIndex(); // and the list of what has an English dub, for the browse filter
   // start.bat sets OPEN=1 so the browser opens only once the server is ready.
   if (process.env.OPEN) {
     const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]

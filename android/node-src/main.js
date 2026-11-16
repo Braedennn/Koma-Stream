@@ -1,8 +1,8 @@
 // Koma on Android: the starter that Node runs inside the app.
 //
-// Koma's site and API are served by the native Rust executable. Node remains
-// only for the separate AniVault streaming API, which Koma reaches over the
-// loopback.
+// One Node runtime hosts both servers, exactly as the desktop shell does with
+// two processes: Koma's own server (what the WebView loads) and the AniVault
+// streaming API (what Koma proxies to over the loopback).
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
@@ -12,7 +12,9 @@ const root = dirname(fileURLToPath(import.meta.url));
 process.chdir(root);
 
 // The phone app and the television app can be installed side by side, and
-// then they both want a streaming port. The first free one wins.
+// then they both want the same ports. The first free pair wins: the site
+// takes one and the streaming API the next. The app is told which one the
+// site got, so it loads the site this app actually started.
 const free = port => new Promise(done => {
   const probe = createServer();
   probe.once('error', () => done(false));
@@ -20,18 +22,25 @@ const free = port => new Promise(done => {
   probe.listen(port, '127.0.0.1');
 });
 
-let api = 0;
+let site = 4180;
+let api = 4181;
 for (let i = 0; i < 20; i++) {
-  const candidate = 4181 + i * 10;
-  if (await free(candidate)) {
-    api = candidate;
-    break;
-  }
+  if (await free(site) && await free(api)) break;
+  site += 10;
+  api += 10;
 }
-if (!api) throw new Error('no free AniVault port at or above 4181');
 
-process.env.PORT = String(api);
+// The servers read their ports and the API key from the environment, so they
+// are set before either module is imported.
+process.env.PORT = String(site);
 process.env.HOST = '127.0.0.1';
+process.env.KOMA_ANIVAULT_URL = `http://127.0.0.1:${api}`;
+try {
+  // The app looks for this file to find the site.
+  writeFileSync(join(root, '..', 'koma-site.port'), String(site));
+} catch (err) {
+  console.error('could not write the site port', err);
+}
 try {
   const env = readFileSync(join(root, 'anivault.env'), 'utf8');
   // Two names for the same key: Koma presents it (KOMA_ANIVAULT_KEY), and the
@@ -43,13 +52,9 @@ try {
   mkdirSync(process.env.KOMA_DATA_DIR, { recursive: true });
 } catch { /* the key file ships with the app; a missing one fails loudly later */ }
 
-// Only the streaming sidecar runs under Node. The native Koma server is a
-// separate process started by the Android app.
-await import('./anivault/dist/server.js');
+// Koma first: the WebView is waiting for it.
+await import('./koma/server.js');
 
-try {
-  // The app reads this file to tell the native server where AniVault lives.
-  writeFileSync(join(root, '..', 'koma-anivault.port'), String(api));
-} catch (err) {
-  console.error('could not write the anivault port', err);
-}
+// The streaming server reads PORT at import time, so it is changed here.
+process.env.PORT = String(api);
+await import('./anivault/dist/server.js');

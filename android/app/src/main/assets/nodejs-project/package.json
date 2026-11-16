@@ -1,1 +1,1 @@
-{"name":"koma-node","private":true,"type":"module","description":"What Node runs inside the Koma APK: the AniVault streaming API sidecar."}
+{"name":"koma-node","private":true,"type":"module","description":"What Node runs inside the Koma APK: Koma server + AniVault streaming API."}

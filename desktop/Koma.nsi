@@ -5,7 +5,7 @@
 !include "LogicLib.nsh"
 
 !define APPNAME "Koma"
-!define VERSION "1.5.3"
+!define VERSION "1.7.16"
 !define PUB "TotallyNoire"
 
 Name "${APPNAME} ${VERSION}"
@@ -16,7 +16,7 @@ RequestExecutionLevel user
 SetCompressor /SOLID lzma
 BrandingText "${APPNAME}"
 
-VIProductVersion "1.5.3.0"
+VIProductVersion "1.7.16.0"
 VIAddVersionKey "LegalCopyright" "TotallyNoire"
 VIAddVersionKey "ProductName" "${APPNAME}"
 VIAddVersionKey "CompanyName" "${PUB}"
@@ -31,6 +31,7 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 !define MUI_WELCOMEPAGE_TEXT "This installs ${APPNAME} as a desktop app: the window opens straight into the site, with the site and its streaming servers bundled inside the app itself - no other software is needed, and no console windows will open.$\r$\n$\r$\n$_CLICK"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${APPNAME}.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Start ${APPNAME} now"
+!define MUI_FINISHPAGE_RUN_CHECKED   ; the app just closed itself — bring it straight back
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -44,29 +45,63 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 
 Section "${APPNAME}" SecInstall
   SetOutPath "$INSTDIR"
-  ; An upgrade while the app is open would fail to overwrite Koma.exe — stop it first
-  ; (/T also stops the servers it started; ones running from start-servers.ps1 stay).
-  ; The app closes itself the moment it hands over to this installer, so this is
-  ; normally a no-op; a manual launch may still find it running. Kill it, then WAIT
-  ; until the process is really gone — copying while it is still dying is exactly what
-  ; breaks an update halfway through.
-  nsExec::Exec 'taskkill /IM ${APPNAME}.exe /T /F'
-  StrCpy $2 40
-  wait_gone:
-  ; find exits 0 while Koma.exe is still listed, 1 once it is gone
-  nsExec::ExecToStack 'cmd /c tasklist /FI "IMAGENAME eq ${APPNAME}.exe" /NH | find /I "${APPNAME}.exe"'
-  Pop $0
-  Pop $1
-  ${If} $0 != 0
-    Goto koma_gone
+
+  ; Where did this installer come from? The app starts it and then closes
+  ; itself, which leaves the installer standing inside the app's process tree.
+  ; The installer has to stop the app (and the servers the app started) before
+  ; it can overwrite the files they are holding — but a tree kill would take
+  ; the installer down with them, and the update would die before it began.
+  ; So when the app started us, we wait for it to close on its own. Only an
+  ; installer the user started by hand is free to kill the tree.
+  ClearErrors
+  ${GetOptions} $CMDLINE "/fromapp" $5
+  ${If} ${Errors}
+    StrCpy $6 0
+  ${Else}
+    StrCpy $6 1
   ${EndIf}
-  DetailPrint "Waiting for ${APPNAME} to close…"
-  IntOp $2 $2 - 1
-  ${If} $2 == 0
-    Goto koma_gone
+
+  ${If} $6 == 1
+    ; the app is closing itself — wait for it (and its servers) to be gone
+    StrCpy $2 60
+    wait_app:
+    nsExec::ExecToStack 'cmd /c tasklist /FI "IMAGENAME eq ${APPNAME}.exe" /NH | find /I "${APPNAME}.exe"'
+    Pop $0
+    Pop $1
+    ${If} $0 != 0
+      Goto koma_gone
+    ${EndIf}
+    DetailPrint "Waiting for ${APPNAME} to close…"
+    IntOp $2 $2 - 1
+    ${If} $2 == 0
+      ; still there after half a minute — force it, but never the whole tree
+      nsExec::Exec 'taskkill /IM ${APPNAME}.exe /F'
+      Sleep 800
+      Goto koma_gone
+    ${EndIf}
+    Sleep 300
+    Goto wait_app
+  ${Else}
+    ; started by hand while the app was open — stop it, and the servers with it
+    ; (/T also stops the servers it started; ones running from start-servers.ps1 stay).
+    nsExec::Exec 'taskkill /IM ${APPNAME}.exe /T /F'
+    StrCpy $2 40
+    wait_gone:
+    ; find exits 0 while Koma.exe is still listed, 1 once it is gone
+    nsExec::ExecToStack 'cmd /c tasklist /FI "IMAGENAME eq ${APPNAME}.exe" /NH | find /I "${APPNAME}.exe"'
+    Pop $0
+    Pop $1
+    ${If} $0 != 0
+      Goto koma_gone
+    ${EndIf}
+    DetailPrint "Waiting for ${APPNAME} to close…"
+    IntOp $2 $2 - 1
+    ${If} $2 == 0
+      Goto koma_gone
+    ${EndIf}
+    Sleep 300
+    Goto wait_gone
   ${EndIf}
-  Sleep 300
-  Goto wait_gone
   koma_gone:
   ; a beat for the OS to release the handles the app and its servers were holding
   Sleep 800
@@ -87,9 +122,21 @@ Section "${APPNAME}" SecInstall
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "EstimatedSize" "$0"
 
   CreateDirectory "$SMPROGRAMS\${APPNAME}"
-  CreateShortcut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\${APPNAME}.exe"
-  CreateShortcut "$SMPROGRAMS\${APPNAME}\Uninstall ${APPNAME}.lnk" "$INSTDIR\Uninstall.exe"
-  CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\${APPNAME}.exe"
+  ; The icon is named outright rather than left to the shell. A shortcut with
+  ; an empty icon location keeps whatever the shell cached for it, which is
+  ; how the desktop ended up showing a stale picture after the icon changed.
+  CreateShortcut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\${APPNAME}.exe" "" "$INSTDIR\${APPNAME}.exe" 0
+  CreateShortcut "$SMPROGRAMS\${APPNAME}\Uninstall ${APPNAME}.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\${APPNAME}.exe" 0
+  CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\${APPNAME}.exe" "" "$INSTDIR\${APPNAME}.exe" 0
+
+  ; An update the app ran by itself (/relaunch) brings Koma back up when it is
+  ; done — the user never has to start it again. A manual install keeps the
+  ; "Start Koma now" checkbox on the finish page instead.
+  ${GetOptions} $CMDLINE "/relaunch" $0
+  ${IfNot} ${Errors}
+    DetailPrint "Starting ${APPNAME}…"
+    ExecShell open '"$INSTDIR\${APPNAME}.exe"'
+  ${EndIf}
 SectionEnd
 
 Section "Uninstall"
