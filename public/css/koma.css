@@ -1434,6 +1434,16 @@ html.dlg-open, html.dlg-open body { overflow: hidden; }
   .kp-vol-rail { width: 48px; }
   .kp-vol-rail span { opacity: 1; }
 }
+
+/* ---------- the Android shell ---------- */
+/* A phone watching video is landscape, and a landscape phone is not a narrow
+   window: the width queries above stop matching and the player's volume
+   slider came back exactly while something was playing - beside the device's
+   own volume slider, which the rocker raises. Volume on Android belongs to
+   the device, so the player's slider only exists where the device has none.
+   The footer is the website's furniture; the app is not a website. */
+html.android:not(.tv) .kp-vol-rail { display: none; }
+html.android .foot { display: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 /* nothing may stay hidden waiting for an animation that will never run */

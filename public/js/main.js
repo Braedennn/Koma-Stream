@@ -25,6 +25,10 @@ import { initTv, isTv } from './tv.js';
    footer reports the app's own version ("Up to date") instead of presenting
    Koma as a web page, and the fine print says where the data really lives. */
 if (window.KomaAndroid) {
+  // The page is the app, not a web page: the stylesheet drops the site's own
+  // furniture on `html.android` (the footer, and the player's volume slider,
+  // which the device's own volume control replaces).
+  document.documentElement.classList.add('android');
   const v = String(window.KomaAndroid.version() || 'dev');
   window.koma = { version: () => Promise.resolve({ current: v, latest: v, outdated: false }) };
   const fine = document.querySelector('.fine');
