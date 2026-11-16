@@ -1,0 +1,137 @@
+// Talks to our own server (/api/*), never to AniList directly. Responses are cached for a few minutes.
+const cache = new Map(); // path -> { at, p }
+const TTL = 5 * 60e3;
+
+export function api(path) {
+  const hit = cache.get(path);
+  if (hit && Date.now() - hit.at < TTL) return hit.p;
+  const p = fetch('/api' + path, { headers: { Accept: 'application/json' } }).then(async res => {
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(body.error || `The server answered with status ${res.status}.`), { status: res.status });
+    return body;
+  }, () => {
+    throw Object.assign(new Error("Can't reach the Koma server. Check that it's still running."), { status: 0 });
+  });
+  cache.set(path, { at: Date.now(), p });
+  p.catch(() => cache.delete(path));
+  return p;
+}
+
+/** Many titles by id, in order. The server takes 50 per request, so longer lists go in parallel batches. */
+export async function mediaByIds(ids) {
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 50) chunks.push(ids.slice(i, i + 50));
+  const parts = await Promise.all(chunks.map(c => api('/media?ids=' + c.join(','))));
+  return parts.flatMap(d => d.media);
+}
+
+/** Every page of an anime's airing schedule, up to `maxPages` × 50 episodes. */
+export async function airingSchedule(id, maxPages = 6) {
+  const nodes = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const s = await api(`/anime/${id}/episodes?page=${page}`);
+    nodes.push(...s.nodes);
+    if (!s.pageInfo.hasNextPage) break;
+  }
+  return nodes;
+}
+
+/**
+ * The episode list of THIS part of the show, as Koma resolved it.
+ *
+ * The server works out which streaming entry holds the part that was asked for
+ * (a show split into cours is several entries, and the streaming server can
+ * land on the wrong one), then sends back that part's episodes with the
+ * titles and pictures that belong to them.
+ */
+const sourceEps = new Map();
+export function sourceEpisodes(a) {
+  const id = Number(a?.id ?? a);
+  if (!id) return Promise.resolve({ episodes: [], offset: 0 });
+  if (!sourceEps.has(id)) {
+    sourceEps.set(id, fetch(`/api/stream/episodes?anilistId=${id}&source=anikoto`, { signal: AbortSignal.timeout(25000) })
+      .then(r => r.json()).then(d => (Array.isArray(d.episodes) ? d : { episodes: [], offset: 0 }))
+      .catch(() => { sourceEps.delete(id); return { episodes: [], offset: 0 }; }));
+  }
+  return sourceEps.get(id);
+}
+
+/**
+ * The seasons around a title, in watch order: follows AniList's PREQUEL/SEQUEL links both ways.
+ * Only TV, TV short and web (ONA) entries count as seasons. OVAs, specials, movies and music are
+ * skipped, but the walk continues through them so a movie between two seasons doesn't break the chain.
+ */
+const SEASON_FORMATS = ['TV', 'TV_SHORT', 'ONA'];
+const chains = new Map();
+export function seasonChain(a) {
+  if (chains.has(a.id)) return chains.get(a.id);
+  const seen = new Set([a.id]);
+  const isSeason = m => SEASON_FORMATS.includes(m.format);
+  const walk = async (rel) => {
+    const out = [];
+    let m = a;
+    for (let hop = 0; hop < 8; hop++) {
+      const edges = (m.relations?.edges || []).filter(e => e.relationType === rel && e.node?.type === 'ANIME' && !seen.has(e.node.id));
+      const e = edges.find(x => SEASON_FORMATS.includes(x.node.format)) || edges[0]; // prefer the TV follow-up over a movie
+      if (!e) break;
+      seen.add(e.node.id);
+      m = await api(`/anime/${e.node.id}`).catch(() => null);
+      if (!m) break;
+      if (isSeason(m)) out.push(m);
+    }
+    return out;
+  };
+  const p = Promise.all([walk('PREQUEL'), walk('SEQUEL')])
+    .then(([before, after]) => [...before.reverse(), a, ...after])
+    .catch(() => [a]);
+  chains.set(a.id, p);
+  p.then(list => list.forEach(m => chains.has(m.id) || chains.set(m.id, p))); // same chain from any member
+  return p;
+}
+
+/**
+ * The story order around a title, for the Watch order tab: the full prequel→sequel line (every
+ * anime format counts — a movie inside the line is part of the story) plus the side stories and
+ * spin-offs hanging off that line, fetched and sorted by start date. Unlike seasonChain this
+ * keeps films and OVAs in the line itself and picks up more hops (franchises like Monogatari
+ * run deep), so it's slower — the tab loads it in the background and it stays cached.
+ */
+const orders = new Map();
+export function watchOrder(a) {
+  if (orders.has(a.id)) return orders.get(a.id);
+  const seen = new Set([a.id]);
+  const walk = async rel => {
+    const out = [];
+    let m = a;
+    for (let hop = 0; hop < 10; hop++) {
+      const edges = (m.relations?.edges || []).filter(x => x.relationType === rel && x.node?.type === 'ANIME' && !seen.has(x.node.id));
+      if (!edges.length) break;
+      const e = edges.find(x => SEASON_FORMATS.includes(x.node.format)) || edges[0]; // a real season beats a recap movie when both follow
+      seen.add(e.node.id);
+      m = await api(`/anime/${e.node.id}`).catch(() => null);
+      if (!m) break;
+      out.push(m);
+    }
+    return out;
+  };
+  const dateKey = d => (((d?.year ?? 0) * 10000) + ((d?.month ?? 0) * 100) + (d?.day ?? 0));
+  const p = Promise.all([walk('PREQUEL'), walk('SEQUEL')]).then(async ([before, after]) => {
+    const line = [...before.reverse(), a, ...after];
+    // Side stories and spin-offs of anything on the line become the tab's "extras".
+    const extras = new Map();
+    for (const m of line)
+      for (const e of m.relations?.edges || [])
+        if ((e.relationType === 'SIDE_STORY' || e.relationType === 'SPIN_OFF') && e.node?.type === 'ANIME' && !seen.has(e.node.id))
+          extras.set(e.node.id, { rel: e.relationType, node: e.node });
+    const picks = [...extras.values()].sort((x, y) => dateKey(x.node.startDate) - dateKey(y.node.startDate)).slice(0, 12);
+    return {
+      line,
+      extras: (await Promise.all(picks.map(x => api(`/anime/${x.node.id}`)
+        .then(m => (m ? { rel: x.rel, m } : null)).catch(() => null)))).filter(Boolean),
+    };
+  }).catch(() => ({ line: [a], extras: [] }));
+  orders.set(a.id, p);
+  p.then(o => o.line.forEach(m => orders.has(m.id) || orders.set(m.id, p))); // same order from any member
+  return p;
+}
+

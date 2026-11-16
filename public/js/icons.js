@@ -34,10 +34,12 @@ const paths = {
   gear: '<path d="M10.4 3.5h3.2l.5 2.1 2 .8 1.9-1.1 2.3 2.3-1.1 1.9.8 2 2.1.5v3.2l-2.1.5-.8 2 1.1 1.9-2.3 2.3-1.9-1.1-2 .8-.5 2.1h-3.2l-.5-2.1-2-.8-1.9 1.1-2.3-2.3 1.1-1.9-.8-2-2.1-.5v-3.2l2.1-.5.8-2-1.1-1.9 2.3-2.3 1.9 1.1 2-.8z"/><circle cx="12" cy="12" r="3.4"/>',
   cc: '<rect x="3" y="5" width="18" height="14" rx="3.5"/><path d="M10.4 10.3a2.7 2.7 0 1 0 0 3.4M17.2 10.3a2.7 2.7 0 1 0 0 3.4"/>',
   mic: '<rect x="9" y="3" width="6" height="11.5" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7"/>',
+  users: '<circle cx="9.5" cy="8" r="3.2"/><path d="M3.5 19.5v-1.3A3.7 3.7 0 0 1 7.2 14.5h4.6a3.7 3.7 0 0 1 3.7 3.7v1.3"/><path d="M15.5 5.2a3.2 3.2 0 0 1 0 6.1M17 14.7a3.7 3.7 0 0 1 3.5 3.6v1.2"/>',
   pip: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><rect x="12" y="11.5" width="7" height="5.5" rx="1.4" fill="currentColor" stroke="none"/>',
   skip: '<path d="M4 6l7.2 6L4 18z" fill="currentColor" stroke="none"/><path d="M12.5 6l7.2 6-7.2 6z" fill="currentColor" stroke="none"/>',
   dice: '<rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="8.6" cy="8.6" r="1.2" fill="currentColor" stroke="none"/><circle cx="15.4" cy="8.6" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="8.6" cy="15.4" r="1.2" fill="currentColor" stroke="none"/><circle cx="15.4" cy="15.4" r="1.2" fill="currentColor" stroke="none"/>',
   reload: '<path d="M20 12a8 8 0 1 1-2.3-5.6M20 3.5V8h-4.5"/>',
+  chart: '<path d="M4 19h16M7 16V9m5 7V5m5 11v-4"/>',
 };
 
 export const icon = (name, cls = '') =>

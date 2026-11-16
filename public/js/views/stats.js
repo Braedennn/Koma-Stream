@@ -73,12 +73,16 @@ export async function stats(root, { alive }) {
     </div>
     ${ts.best.length ? `<div class="tk-list">${ts.best.slice(0, 6).map(r => `
       <a class="tk-row" href="/anime/${r.id}"><span>${esc(nameOf(r.id))}</span><b>${icon('star')}${r.score}<small>/10</small></b></a>`).join('')}</div>` : ''}
-    ${ts.topRewatch ? `<p class="tk-rew">Most rewatched: <a href="/anime/${ts.topRewatch.id}">${esc(nameOf(ts.topRewatch.id))}</a> — ${ts.topRewatch.n}×</p>` : ''}
+    ${ts.topRewatch ? `<a class="tk-rew" href="/anime/${ts.topRewatch.id}">
+      <span class="lead">${icon('reload')}</span>
+      <span class="lbl"><b>Most rewatched</b><span>${esc(nameOf(ts.topRewatch.id))}</span></span>
+      <b class="n">${ts.topRewatch.n}×</b></a>` : ''}
   </section>` : '';
 
   root.innerHTML = `
-    <div class="page-head"><h1>Your stats</h1>
-      <p class="sub">Everything here is logged on this device — finished episodes only, so the numbers are honest.</p></div>
+    <div class="page">
+    <div class="page-head"><div><h1>Your stats</h1>
+      <p>Everything here is logged on this device — finished episodes only, so the numbers are honest.</p></div></div>
     <div class="st-tiles">${tiles.map(([v, label, sub]) => `
       <div class="st-tile"><b>${v}</b><span>${label}</span><small>${esc(sub)}</small></div>`).join('')}</div>
     <div class="stack">
@@ -102,6 +106,7 @@ export async function stats(root, { alive }) {
           : `<div class="badge"><span class="b-i">${icon(b.icon)}</span><b>${b.name}</b><small>${esc(b.hint)}</small>
              <div class="b-bar"><i style="width:${Math.min(100, Math.round(b.value / b.target * 100))}%"></i></div><small class="b-side">${b.value} / ${b.target}</small></div>`).join('')}</div>
       </section>
+    </div>
     </div>`;
 
   // An episode finishing mid-view folds in via a reload — this only happens if you're

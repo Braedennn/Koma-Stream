@@ -40,11 +40,13 @@ function nextEpisode(union, aired, mine) {
  * `progress`  { id: { ep, t, dur, at } } — the episode you are in the middle of.
  * `watched`   { id: [eps] } — every episode marked watched, wherever that came from.
  * `aired`     { id: number } — how many episodes have aired, when that is known.
+ * `skip`      [id] — shows that are planned, finished, dropped or taken out by
+ *                       hand: nothing to continue.
  *
  * Each entry says why it is here: `kind: 'mid'` (you are in the episode) or
  * `kind: 'next'` (you finished some and the next one is waiting).
  */
-export function continueWatching({ journal = [], progress = {}, watched = {}, aired = {} } = {}, { limit = 18 } = {}) {
+export function continueWatching({ journal = [], progress = {}, watched = {}, aired = {}, skip = [] } = {}, { limit = 18 } = {}) {
   const mine = new Map();   // id -> Set of episodes finished here
   const last = new Map();   // id -> when you last touched it
   for (const e of journal) {
@@ -54,14 +56,16 @@ export function continueWatching({ journal = [], progress = {}, watched = {}, ai
     last.set(e.id, Math.max(last.get(e.id) || 0, Number(e.at) || 0));
   }
 
+  const out = new Set(skip.map(Number));
   const rows = [];
   for (const id of watchedShows({ journal, progress })) {
+    if (out.has(id)) continue;   // planned, finished or dropped — there is nothing to pick up
     const slot = progress?.[id];
     const mid = slot && Number.isInteger(Number(slot.ep)) ? Number(slot.ep) : 0;
     const here = mine.get(id) || new Set();
     const union = new Set(watched?.[id] || []);
-    const out = Number(aired?.[id]) || 0;
-    const caughtUp = out > 0 && watchedCount(watched, id) >= out;
+    const airedEp = Number(aired?.[id]) || 0;
+    const caughtUp = airedEp > 0 && watchedCount(watched, id) >= airedEp;
     if (!mid && caughtUp) continue;   // you finished everything that aired — nothing to continue
 
     // The episode you are in the middle of counts as reached, even though it is not done.
@@ -75,7 +79,7 @@ export function continueWatching({ journal = [], progress = {}, watched = {}, ai
     rows.push({
       id,
       kind: mid ? 'mid' : 'next',
-      ep: mid || nextEpisode(union, out, here),
+      ep: mid || nextEpisode(union, airedEp, here),
       left,
       watched: reached.size,
       at: Math.max(last.get(id) || 0, Number(slot?.at) || 0),

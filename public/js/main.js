@@ -1,6 +1,7 @@
 // App shell: client-side routing, header state, search suggestions, My list syncing.
 import { api } from './api.js';
-import { listIds, toggleList, watchedIds } from './store.js';
+import { libraryIds, toggleList, watchedIds, hideFromContinue } from './store.js';
+import { openShelfMenu } from './library.js';
 import { $, $$, esc, errorBox, icon, meta, name, pretty, score, small, syncListButton, toast } from './ui.js';
 import { home } from './views/home.js';
 import { anime } from './views/anime.js';
@@ -11,10 +12,38 @@ import { list } from './views/list.js';
 import { stats } from './views/stats.js';
 import { notFound } from './views/notfound.js';
 import { initAudioBadges } from './streaming.js';
+import { abandon, arrive, initMotion, swapView } from './motion.js';
+import { initSettings } from './settings.js';
+import { initDialogs } from './dialog.js';
 import { initNotifications } from './notify.js';
 import { initPresence, presenceForRoute, setActivity } from './presence.js';
 import { initVersion } from './version.js';
+import { initWindow } from './window.js';
+import { initTv, isTv } from './tv.js';
+
+/* The Android shell injects `KomaAndroid`. With it the page is the app: the
+   footer reports the app's own version ("Up to date") instead of presenting
+   Koma as a web page, and the fine print says where the data really lives. */
+if (window.KomaAndroid) {
+  const v = String(window.KomaAndroid.version() || 'dev');
+  window.koma = { version: () => Promise.resolve({ current: v, latest: v, outdated: false }) };
+  const fine = document.querySelector('.fine');
+  if (fine) fine.textContent = fine.textContent.replace('in this browser', 'on this device');
+}
+
+/* The television build. The class goes on before anything is drawn, so the
+   first page is already laid out for the sofa and the remote. */
+const tv = isTv();
+if (tv) initTv();
+import { initScrollbar } from './scrollbar.js';
+import { initPreviews, previewsOn } from './preview.js';
 import { account, clientId, finishLogin, initAutoSync, loginUrl, REDIRECT, setClientId, signOut, syncNow, syncPending } from './anilist.js';
+import { initRoomUI, joinSession, room, roomUrl, waitForState } from './room.js';
+import { initLinks } from './links.js';
+
+// The links out to Discord and GitHub live in one file; the markup only names
+// them, so the addresses are set here.
+initLinks();
 
 /* ---------- Koma stays in Koma ----------
  * Middle-click here is autoscroll, not "open in browser", and nothing drags out —
@@ -34,7 +63,41 @@ const routes = [
   [/^\/list\/?$/, list],
   [/^\/stats\/?$/, stats],
   [/^\/auth\/anilist\/?$/, authAniList],
+  [/^\/join\/?$/, joinView],
 ];
+
+/* ---------- watch together ---------- */
+// An invite lands here: /join?code=…&host=…&port=… on the viewer's own Koma.
+// We join the session and hand the screen to the host's episode.
+async function joinView(root, { query, alive }) {
+  const code = (query.get('code') || '').trim().toUpperCase();
+  if (!code) {
+    root.innerHTML = '<div class="lost"><h1>No session code</h1><p>Open Koma and choose Watch together → Join a session.</p></div>';
+    return;
+  }
+  root.innerHTML = `<div class="lost"><h1>Joining the session…</h1><p>Code ${esc(code)}</p></div>`;
+  try {
+    await joinSession({ code, host: query.get('host') || '', port: Number(query.get('port')) || 4000 });
+  } catch (err) {
+    root.innerHTML = `<div class="lost"><h1>Couldn’t join the session</h1><p>${esc(err.message)}</p></div>`;
+    return;
+  }
+  if (!alive()) return;
+  // The room may not have said where the host is yet: wait a moment for it.
+  const s = await waitForState(5000);
+  if (!alive()) return;
+  if (location.pathname !== '/join') return; // the room already moved us there
+  if (s?.animeId) { go(roomUrl(s)); return; }
+  toast('Joined the session — waiting for the host');
+  go('/');
+}
+// The host moved to another episode: a viewer follows.
+addEventListener('koma:room-goto', e => {
+  const url = e.detail;
+  if (!url) return;
+  if (url.split('?')[0] === location.pathname) return; // already where the host is
+  go(url);
+});
 
 /* ---------- AniList account ---------- */
 // AniList sends you back to /auth/anilist#access_token=…; finish the sign-in, then show My list.
@@ -111,6 +174,61 @@ initAutoSync(); // mid-session pulls + pending-push flushes
 const html = document.documentElement;
 const header = $('#top');
 
+/* ---------- the navigation drawer ----------
+   The bottom bar is gone: the header carries the navigation now. When the
+   header has no room for the links - a narrow window - the menu button opens
+   them in a drawer instead. */
+const menuBtn = $('#menu-btn');
+const menuDlg = $('#menu');
+
+function closeMenu() {
+  if (menuDlg?.open) menuDlg.close();
+}
+if (menuBtn && menuDlg) {
+  menuBtn.addEventListener('click', () => {
+    if (menuDlg.open) { closeMenu(); return; }
+    menuDlg.showModal();
+    menuBtn.setAttribute('aria-expanded', 'true');
+  });
+  menuDlg.addEventListener('close', () => menuBtn.setAttribute('aria-expanded', 'false'));
+  // The backdrop closes it, and so does a link: the router takes the link
+  // from there.
+  menuDlg.addEventListener('click', e => {
+    if (e.target === menuDlg || e.target.closest('a[href]')) closeMenu();
+  });
+}
+
+/* The shell asks before it leaves the page: whatever is open takes the back
+   button first - the drawer, a panel, a question. */
+window.__komaBack = () => {
+  if (menuDlg?.open) { closeMenu(); return true; }
+  const open = [...document.querySelectorAll('dialog[open]')].pop();
+  if (open) { open.close('cancel'); return true; }
+  return false;
+};
+
+/* ---------- light / dark ---------- */
+// The theme is set on <html> before the first paint (see index.html); this only
+// keeps the browser's chrome colour in step. The switch itself lives in the
+// settings panel.
+function applyTheme(dark) {
+  html.dataset.theme = dark ? 'dark' : 'light';
+  try { localStorage.setItem('koma.theme', dark ? 'dark' : 'light'); } catch { /* private mode */ }
+  $('meta[name="theme-color"]')?.setAttribute('content', dark ? '#000000' : '#FFFFFF');
+}
+applyTheme(html.dataset.theme === 'dark');
+
+// The settings panel edits the same preferences the player uses. Changing the
+// language here tells any open watch page to follow.
+initSettings({
+  onTheme: theme => applyTheme(theme !== 'light'),
+  onAudio: () => dispatchEvent(new CustomEvent('koma:audio')),
+});
+
+// A dialog is its own little page: the page behind it stands still while it
+// is open.
+initDialogs();
+
 /* ---------- routing ---------- */
 history.scrollRestoration = 'manual';
 let current = 0;
@@ -132,7 +250,6 @@ async function render({ y = 0, focus = false } = {}) {
   dispatchEvent(new Event('koma:route')); // lets the outgoing page clean up (the player, mainly)
   const app = $('#app');
   const root = document.createElement('div');
-  app.replaceChildren(root);
   html.classList.remove('has-hero');
   closeSuggest();
   markNav(pathname);
@@ -144,19 +261,28 @@ async function render({ y = 0, focus = false } = {}) {
   // The page you're on is the default presence; the watch and anime pages
   // replace it with something more specific once they know their details.
   setActivity(presenceForRoute(pathname));
+
+  // hand the screen over: the new page goes in at once, the old one lifts away
+  swapView(app, root);
+
   try { await view(root, ctx); }
   catch (err) {
     if (ctx.alive()) { html.classList.remove('has-hero'); errorBox(root, err, () => render()); }
   }
+  if (!ctx.alive()) { abandon(root); return; }
+  arrive(root);
   initAudioBadges(root);
   initNotifications(); // desktop air toasts — no-op in a normal browser
   solidHeader();
   if (y && ctx.alive()) requestAnimationFrame(() => scrollTo(0, y));
+  // The television restores its focus here: the new page is in, so the place
+  // the viewer left can be found again.
+  dispatchEvent(new Event('koma:rendered'));
 }
 
 export function markNav(path = location.pathname) {
   const here = path + location.search;
-  const links = $$('.nav a, .tabbar a');
+  const links = $$('.nav a, .menu-nav a');
   // A link with a query (Trending) wins over the plain page link (Browse) when it matches.
   const queryHit = links.some(a => a.getAttribute('href').includes('?') && here.startsWith(a.getAttribute('href')));
   for (const a of links) {
@@ -198,14 +324,34 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-list]');
   if (!b) return;
   e.preventDefault();
+  // The + on a poster opens the library menu instead of toggling the list.
+  if (b.hasAttribute('data-shelf-open')) { openShelfMenu(b, Number(b.dataset.shelfOpen)); return; }
   toast(toggleList(Number(b.dataset.list)) ? 'Added to My list' : 'Removed from My list');
 });
+
+/* ---------- taking a show out of Continue watching ---------- */
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-continue-remove]');
+  if (!b) return;
+  e.preventDefault();
+  e.stopPropagation();
+  // The button can also sit in the preview strip, outside the card.
+  const card = b.closest('.card')
+    || $(`.card [data-continue-remove="${b.dataset.continueRemove}"]`)?.closest('.card');
+  const track = card?.closest('.track');   // before the card leaves the page
+  hideFromContinue(Number(b.dataset.continueRemove));
+  card?.remove();
+  // A rail with nothing left in it goes away with its last card.
+  if (track && !track.querySelector('.card')) track.closest('section.row')?.remove();
+  toast('Taken out of Continue watching');
+});
 function syncList() {
-  const n = listIds().length;
+  const n = libraryIds().length;
   for (const c of $$('[data-count]')) { c.textContent = n; c.hidden = !n; }
   $$('[data-list]').forEach(syncListButton);
 }
 addEventListener('koma:store', syncList);
+addEventListener('koma:shelf', syncList);
 syncList();
 
 /* ---------- header search with suggestions ---------- */
@@ -317,6 +463,14 @@ surprise?.addEventListener('click', async () => {
   }
 });
 
+initMotion($('#app'));
 render();
+initRoomUI();
 initPresence().catch(() => {});
 initVersion();
+initWindow();
+initScrollbar();
+// The previews need a pointer - or, on a television, the focus. They are off
+// on a television until the viewer asks for them, and the card menu carries
+// what the preview was for until then.
+if (!tv || previewsOn()) initPreviews();

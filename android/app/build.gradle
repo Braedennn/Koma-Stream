@@ -1,0 +1,79 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.koma.app'
+    compileSdk 34
+    ndkVersion '26.1.10909125'
+
+    defaultConfig {
+        applicationId 'app.koma.stream'
+        minSdk 24          // libnode is built against 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.7.16'
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64' }
+        externalNativeBuild {
+            cmake {
+                // libnode.so is built against the shared C++ runtime: without
+                // this the APK ships no libc++_shared.so and
+                // System.loadLibrary("node") dies on open. The desktop plugin
+                // had the same rule for apps without React Native's copy.
+                arguments '-DANDROID_STL=c++_shared'
+            }
+        }
+    }
+
+    // Two apps from one code base: the phone app and the television app.
+    // They install side by side - the television keeps its own package name
+    // so both can live on the same device - and they differ in the manifest
+    // (leanback launcher, banner), in the build flag the page asks about,
+    // and in nothing else: the site is the same site.
+    flavorDimensions += 'platform'
+    productFlavors {
+        phone {
+            dimension 'platform'
+            buildConfigField 'boolean', 'IS_TV', 'false'
+        }
+        tv {
+            dimension 'platform'
+            applicationIdSuffix '.tv'
+            versionNameSuffix '-tv'
+            buildConfigField 'boolean', 'IS_TV', 'true'
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path 'src/main/cpp/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+
+    // Extract the native libraries at install time. The default (mmap them
+    // straight out of the APK) fails on some emulators' linkers - LDPlayer
+    // included - and the app closes instantly with nothing on screen.
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    buildTypes {
+        release {
+            // A test build: signed with the debug key so it installs anywhere.
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

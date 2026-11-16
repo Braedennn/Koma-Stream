@@ -1,5 +1,5 @@
 import { api, mediaByIds } from '../api.js';
-import { readJournal, readProgress, watchedIds, watchedMap } from '../store.js';
+import { readJournal, readProgress, shelvedOut, watchedIds, watchedMap, continueHidden } from '../store.js';
 import { continueWatching, watchedShows } from '../continuing.js';
 import { genreWeights, rankCandidates, topGenres } from '../taste.js';
 import { $, airedCount, cap, card, genreTile, hero, initHero, initRails, rankCard, row, setTitle, skRow } from '../ui.js';
@@ -7,7 +7,7 @@ import { $, airedCount, cap, card, genreTile, hero, initHero, initRails, rankCar
 export async function home(root, { alive }) {
   setTitle();
   document.documentElement.classList.add('has-hero');
-  root.innerHTML = `<div class="sk sk-hero"></div><div class="rows" style="margin-top:-84px">${skRow()}${skRow()}</div>`;
+  root.innerHTML = `<div class="sk sk-hero"></div><div class="rows">${skRow()}${skRow()}</div>`;
 
   const d = await api('/home');
   if (!alive()) return;
@@ -46,13 +46,14 @@ export async function home(root, { alive }) {
 async function continueRail(slot, alive) {
   const journal = readJournal();
   const progress = readProgress();
-  const ids = watchedShows({ journal, progress });
+  const hidden = continueHidden();
+  const ids = watchedShows({ journal, progress }).filter(id => !hidden.has(id));
   if (!ids.length) return;
   let media;
   try { media = await mediaByIds(ids); } catch { return; }
   if (!alive()) return;
   const aired = Object.fromEntries(media.map(a => [a.id, airedCount(a)]));
-  const entries = continueWatching({ journal, progress, watched: watchedMap(), aired });
+  const entries = continueWatching({ journal, progress, watched: watchedMap(), aired, skip: [...shelvedOut(), ...hidden] });
   if (!entries.length) return;
   const byId = new Map(media.map(a => [a.id, a]));
   slot.insertAdjacentHTML('afterend', row({
@@ -65,7 +66,7 @@ async function continueRail(slot, alive) {
       const note = e.kind === 'mid'
         ? `Episode ${e.ep}${e.left ? ` · ${e.left} min left` : ''}`
         : `Episode ${e.ep} next`;
-      return card(a, { progress: true, note, seen: e.watched });
+      return card(a, { progress: true, note, seen: e.watched, dismiss: true });
     }).join(''),
   }));
   const section = slot.nextElementSibling;

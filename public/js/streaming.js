@@ -13,23 +13,46 @@ export async function streamStatus() {
   try { return (await fetch('/api/stream-status')).ok; } catch { return false; }
 }
 
-// Resolving a stream takes seconds upstream, so answers are shared for a few
-// minutes: the watch page can start resolving before it has drawn, and the next
-// episode is resolved ahead of time near the end of the current one.
+// Resolving a stream takes seconds upstream, so answers are shared for a
+// minute: the watch page can start resolving before it has drawn, and the
+// next episode is resolved ahead of time near the end of the current one.
+//
+// A minute is the most an answer can be kept: the link inside it is signed by
+// the streaming host and dies ninety seconds after it was made. An answer
+// kept longer would hand the player a link that no longer opens, and the
+// viewer would wait for a refresh instead of watching.
 const resolved = new Map(); // query -> { at, p }
-const RESOLVE_TTL = 5 * 60e3;
+const RESOLVE_TTL = 60e3;
 
-export function streamWatch({ anilistId, ep, type, source = 'anikoto', server, fresh = false }) {
+// How long the browser waits for a stream to resolve.
+//
+// The server finishes inside its own budget and then says what stopped it,
+// so the browser waits longer than that: a player that gives up while the
+// server is still working shows "couldn't get a stream" and the reason never
+// reaches the screen. The time that is left is also sent to the server, so it
+// answers while the browser is still waiting.
+export const RESOLVE_TIMEOUT = 150e3;
+
+export function streamWatch({ anilistId, ep, type, source = 'anikoto', server, fresh = false, ms = RESOLVE_TIMEOUT }) {
   const p = new URLSearchParams({ source, anilistId: String(anilistId), ep: String(ep), type });
   if (server) p.set('server', server);
   const key = String(p);
   const hit = resolved.get(key);
   if (!fresh && hit && Date.now() - hit.at < RESOLVE_TTL) return hit.p;
   if (fresh) p.set('fresh', '1'); // tells Koma's server to skip its own short cache too
-  const req = fetch('/api/stream/watch?' + p, { signal: AbortSignal.timeout(30000) }).then(async res => {
+  const wait = Math.max(1000, Math.min(ms, RESOLVE_TIMEOUT));
+  const req = fetch('/api/stream/watch?' + p, {
+    signal: AbortSignal.timeout(wait),
+    headers: { 'x-koma-deadline': String(wait) },
+  }).then(async res => {
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(body.error || `The streaming server answered with status ${res.status}.`), { status: res.status });
     return body;
+  }).catch(err => {
+    // The browser gave up before the server did. The reason is then unknown,
+    // so it says that - instead of pretending the episode is not there.
+    if (err?.name === 'TimeoutError') throw Object.assign(new Error('The streaming server took too long to answer.'), { status: 504 });
+    throw err;
   });
   resolved.set(key, { at: Date.now(), p: req });
   req.catch(() => { if (resolved.get(key)?.p === req) resolved.delete(key); });
@@ -66,19 +89,33 @@ function paint(scope) {
   ids.forEach(id => painted.add(id));
   if (fresh) pollDelay = 4000; // new batch: reset the retry backoff
   painting = true;
-  fetch('/api/audio?ids=' + ids.join(',')).then(r => r.json()).then(d => {
-    let stillPending = false;
-    for (const el of slots) {
-      const c = d.counts[el.dataset.audioBadge];
-      if (c) el.innerHTML = audioBadgeHTML(c);
-      else if (d.pending) { painted.delete(el.dataset.audioBadge); stillPending = true; }
-    }
-    if (stillPending && scope.isConnected && !document.hidden) {
-      clearTimeout(pollTimer);
-      pollDelay = Math.min((pollDelay || 4000) * 2, 30000);
-      pollTimer = setTimeout(() => paint(scope), pollDelay);
-    }
-  }).catch(() => ids.forEach(id => painted.delete(id))).finally(() => { painting = false; });
+  // The server answers for one batch of ids at a time: asking for every card
+  // in one go would leave the ones past the first batch waiting forever, so
+  // they are asked for in batches of their own.
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 60) chunks.push(ids.slice(i, i + 60));
+  Promise.all(chunks.map(c => fetch('/api/audio?ids=' + c.join(',')).then(r => r.json())))
+    .then(list => {
+      const counts = {};
+      let pending = 0;
+      for (const d of list) {
+        Object.assign(counts, d.counts || {});
+        pending += d.pending || 0;
+      }
+      let stillPending = false;
+      for (const el of slots) {
+        const c = counts[el.dataset.audioBadge];
+        if (c) el.innerHTML = audioBadgeHTML(c);
+        else if (pending) { painted.delete(el.dataset.audioBadge); stillPending = true; }
+      }
+      if (stillPending && scope.isConnected && !document.hidden) {
+        clearTimeout(pollTimer);
+        pollDelay = Math.min((pollDelay || 4000) * 2, 30000);
+        pollTimer = setTimeout(() => paint(scope), pollDelay);
+      }
+    })
+    .catch(() => ids.forEach(id => painted.delete(id)))
+    .finally(() => { painting = false; });
 }
 
 /**

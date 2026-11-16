@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<script src="/js/canvas.js"></script>
+<title>Koma</title>
+<meta name="description" content="Browse anime by season, weekly schedule and genre. Watch sub and dub episodes straight from the site.">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://s4.anilist.co">
+<script src="/js/theme.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/koma.css">
+<link rel="stylesheet" href="/css/tv.css">
+<script type="module" src="/js/main.js"></script>
+</head>
+<body>
+<a class="skip" href="#app">Skip to content</a>
+
+<header class="top" id="top">
+  <button class="icon-btn menu-btn" id="menu-btn" type="button" aria-label="Menu" aria-haspopup="dialog" aria-expanded="false" title="Menu">
+    <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+  </button>
+  <a class="logo" href="/" aria-label="Koma home">
+    <span class="logo-mark"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5.4 4.8v14.4a1 1 0 0 0 1.5.86l11.5-7.2a1 1 0 0 0 0-1.72L6.9 3.94A1 1 0 0 0 5.4 4.8z" fill="currentColor"/></svg></span>
+    <span class="logo-word">koma</span>
+  </a>
+  <nav class="nav" aria-label="Main">
+    <a href="/">Home</a>
+    <a href="/browse">Browse</a>
+    <a href="/schedule">Schedule</a>
+    <a href="/browse?sort=TRENDING_DESC">Trending</a>
+    <a href="/list">Library <span class="count" data-count hidden></span></a>
+    <a href="/stats">Stats</a>
+  </nav>
+  <form class="search" role="search" action="/browse" autocomplete="off">
+    <label class="search-field">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <span class="sr">Search anime</span>
+      <input id="q" name="search" type="search" placeholder="Search anime" role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list" enterkeyhint="search">
+      <kbd class="kbd" aria-hidden="true">Ctrl K</kbd>
+    </label>
+    <ul id="suggest" class="suggest" role="listbox" aria-label="Suggestions" hidden></ul>
+  </form>
+  <div class="top-actions">
+    <a class="icon-btn" data-link="discord" target="_blank" rel="noopener" title="Koma on Discord" aria-label="Koma on Discord">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M20.317 4.3698a19.7913 19.7913 0 0 0-4.8851-1.5152.0741.0741 0 0 0-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 0 0-.0785-.037 19.7363 19.7363 0 0 0-4.8852 1.515.0699.0699 0 0 0-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 0 0 .0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 0 0 .0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 0 0-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 0 1-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 0 1 .0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 0 1 .0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 0 1-.0066.1276 12.2986 12.2986 0 0 1-1.873.8914.0766.0766 0 0 0-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 0 0 .0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 0 0 .0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 0 0-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>
+    </a>
+    <button class="icon-btn" id="surprise" type="button" title="Surprise me — a well-rated pick you haven't seen" aria-label="Surprise me: roll a random well-rated anime you haven't seen">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="8.6" cy="8.6" r="1.2" fill="currentColor" stroke="none"/><circle cx="15.4" cy="8.6" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="8.6" cy="15.4" r="1.2" fill="currentColor" stroke="none"/><circle cx="15.4" cy="15.4" r="1.2" fill="currentColor" stroke="none"/></svg>
+    </button>
+    <button class="icon-btn" id="settings-btn" type="button" title="Settings" aria-label="Settings">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+    <div class="acct" id="acct"></div>
+  </div>
+  <div class="win-ctl" id="win-ctl" hidden>
+    <button class="icon-btn win-btn" id="win-min" type="button" title="Minimise" aria-label="Minimise">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+    </button>
+    <button class="icon-btn win-btn" id="win-max" type="button" title="Maximise" aria-label="Maximise">
+      <svg class="i i-max" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+      <svg class="i i-restore" viewBox="0 0 24 24" aria-hidden="true" hidden><rect x="5" y="9" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M9 9V7a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+    </button>
+    <button class="icon-btn win-btn win-close" id="win-close" type="button" title="Close" aria-label="Close">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 7.5l9 9M16.5 7.5l-9 9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<dialog class="modal menu-sheet" id="menu" aria-label="Menu">
+  <nav class="menu-nav" aria-label="Main">
+    <a href="/">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5L12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/></svg>Home</a>
+    <a href="/browse">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></svg>Browse</a>
+    <a href="/schedule">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Schedule</a>
+    <a href="/browse?sort=TRENDING_DESC">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c4 0 7-2.7 7-6.5 0-3.4-2.4-5.6-4-7.5-.4 2-1.5 3.2-2.7 3.7C12.6 7.6 11 5 8.5 3c.3 3-3.5 5.5-3.5 10.5C5 18.3 8 21 12 21z"/></svg>Trending</a>
+    <a href="/list">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z"/></svg>Library<span class="count" data-count hidden></span></a>
+    <a href="/stats">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16M7 16V9m5 7V5m5 11v-4"/></svg>Stats</a>
+  </nav>
+</dialog>
+
+<dialog class="modal" id="al-setup" aria-labelledby="al-setup-title">
+  <form method="dialog" class="modal-body">
+    <h2 id="al-setup-title">Connect your AniList account</h2>
+    <p>AniList needs a free “API client” on your account before Koma can sign in. You only do this once:</p>
+    <ol>
+      <li>Open <a href="https://anilist.co/settings/developer" target="_blank" rel="noopener">AniList developer settings</a> and click <b>Create New Client</b>.</li>
+      <li>Name it <b>Koma</b> and set the <b>Redirect URL</b> to:
+        <span class="copy-row"><code id="al-redirect"></code><button class="btn btn-ghost btn-sm" type="button" data-copy-redirect>Copy</button></span></li>
+      <li>Save, then paste the <b>Client ID</b> (a number) here:</li>
+    </ol>
+    <label class="field"><span class="sr">Client ID</span><input id="al-client" inputmode="numeric" autocomplete="off" placeholder="Client ID, e.g. 12345"></label>
+    <p class="modal-err" id="al-err" hidden></p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn btn-primary btn-sm" value="ok" id="al-continue">Continue to AniList</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="modal settings-modal" id="settings" aria-labelledby="settings-title">
+  <div class="modal-body settings-body">
+    <header class="settings-head">
+      <h2 id="settings-title">Settings</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close settings">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+
+    <section class="settings-group">
+      <h3>Preferred audio</h3>
+      <p class="settings-note">Koma opens every anime in the language you pick. When a title has no English dub, it falls back to the Japanese audio and the dub button is greyed out.</p>
+      <div class="seg-ctl" role="radiogroup" aria-label="Preferred audio">
+        <button type="button" role="radio" data-set-audio="sub" aria-checked="true">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11v5a3 3 0 0 0 5.2 2l3.8-3.8a3 3 0 0 0-4.2-4.2L10.5 11.3"/><path d="M17 13v-5a3 3 0 0 0-5.2-2L8 9.8"/></svg>
+          Subtitles
+        </button>
+        <button type="button" role="radio" data-set-audio="dub" aria-checked="false">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg>
+          English dub
+        </button>
+      </div>
+    </section>
+
+    <section class="settings-group">
+      <h3>Subtitles</h3>
+      <p class="settings-note">Koma opens every anime with English subtitles — Automatic always means English. Pick another language and Koma uses it whenever the source has it.</p>
+      <div class="lang-list" role="radiogroup" aria-label="Preferred subtitles">
+        <button type="button" role="radio" data-set-subs="" aria-checked="true">Automatic</button>
+        <button type="button" role="radio" data-set-subs="en" aria-checked="false">English</button>
+        <button type="button" role="radio" data-set-subs="ja" aria-checked="false">Japanese</button>
+        <button type="button" role="radio" data-set-subs="es" aria-checked="false">Spanish</button>
+        <button type="button" role="radio" data-set-subs="pt" aria-checked="false">Portuguese</button>
+        <button type="button" role="radio" data-set-subs="fr" aria-checked="false">French</button>
+        <button type="button" role="radio" data-set-subs="de" aria-checked="false">German</button>
+        <button type="button" role="radio" data-set-subs="it" aria-checked="false">Italian</button>
+        <button type="button" role="radio" data-set-subs="ru" aria-checked="false">Russian</button>
+        <button type="button" role="radio" data-set-subs="ar" aria-checked="false">Arabic</button>
+        <button type="button" role="radio" data-set-subs="hi" aria-checked="false">Hindi</button>
+        <button type="button" role="radio" data-set-subs="zh" aria-checked="false">Chinese</button>
+        <button type="button" role="radio" data-set-subs="tr" aria-checked="false">Turkish</button>
+        <button type="button" role="radio" data-set-subs="pl" aria-checked="false">Polish</button>
+        <button type="button" role="radio" data-set-subs="id" aria-checked="false">Indonesian</button>
+        <button type="button" role="radio" data-set-subs="th" aria-checked="false">Thai</button>
+      </div>
+    </section>
+
+    <section class="settings-group">
+      <h3>Picture</h3>
+      <p class="settings-note">In full screen the picture is fitted onto the whole screen, whatever shape the television is: the black bands of the file are cut away, and if the show is squarer than the screen it is widened a little rather than cut into. Turn this off to keep the frame exactly as it was made, with the artwork of the show around it.</p>
+      <div class="seg-ctl" role="radiogroup" aria-label="Picture in full screen">
+        <button type="button" role="radio" data-set-picture="fill" aria-checked="true">Fit to the screen</button>
+        <button type="button" role="radio" data-set-picture="whole" aria-checked="false">The whole frame</button>
+      </div>
+    </section>
+
+    <section class="settings-group">
+      <h3>Playback</h3>
+      <label class="settings-row">
+        <span>Autoplay the next episode</span>
+        <span class="switch"><input type="checkbox" data-set-pref="autoNext"><span class="knob"></span></span>
+      </label>
+      <label class="settings-row">
+        <span>Skip the opening</span>
+        <span class="switch"><input type="checkbox" data-set-pref="skipIntro"><span class="knob"></span></span>
+      </label>
+      <label class="settings-row">
+        <span>Skip the ending</span>
+        <span class="switch"><input type="checkbox" data-set-pref="skipOutro"><span class="knob"></span></span>
+      </label>
+      <label class="settings-row">
+        <span>Autoplay when you open an episode</span>
+        <span class="switch"><input type="checkbox" data-set-pref="autoplay"><span class="knob"></span></span>
+      </label>
+      <label class="settings-row">
+        <span>Play a preview when you point at a card</span>
+        <span class="switch"><input type="checkbox" data-set-previews><span class="knob"></span></span>
+      </label>
+      <p class="settings-note">A card plays its trailer while you point at it — with the pointer on a computer, with the focus on a television — and an episode in the list plays itself. The previews are silent.</p>
+    </section>
+
+    <section class="settings-group">
+      <h3>Appearance</h3>
+      <div class="seg-ctl" role="radiogroup" aria-label="Theme">
+        <button type="button" role="radio" data-set-theme="light" aria-checked="false">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          Light
+        </button>
+        <button type="button" role="radio" data-set-theme="dark" aria-checked="true">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.3A8.5 8.5 0 1 1 9.7 3.5a7 7 0 0 0 10.8 10.8z"/></svg>
+          Dark
+        </button>
+      </div>
+    </section>
+
+    <section class="settings-group" data-app-only hidden>
+      <h3>App</h3>
+      <label class="settings-row" data-desktop-only>
+        <span>Keep playing in the tray when the window closes</span>
+        <span class="switch"><input type="checkbox" data-set-tray><span class="knob"></span></span>
+      </label>
+      <p class="settings-note" data-desktop-only>The X hides the window instead of quitting — the stream keeps going, and the tray icon brings it back or quits properly.</p>
+      <label class="settings-row">
+        <span>Find out what is not working</span>
+        <button class="btn btn-ghost btn-sm" type="button" data-diagnose>Check</button>
+      </label>
+      <div class="diag" data-diagnose-out hidden></div>
+    </section>
+
+    <section class="settings-group" data-data-section>
+      <h3>Data</h3>
+      <label class="settings-row">
+        <span>Save my progress, settings and lists to a file</span>
+        <button class="btn btn-ghost btn-sm" type="button" data-backup hidden>Export</button>
+      </label>
+      <label class="settings-row">
+        <span>Restore from a backup file</span>
+        <button class="btn btn-ghost btn-sm" type="button" data-restore hidden>Import</button>
+      </label>
+      <label class="settings-row">
+        <span>Clear my progress and list</span>
+        <button class="btn btn-ghost btn-sm" type="button" data-reset>Reset</button>
+      </label>
+    </section>
+
+    <p class="settings-foot">Koma <span id="settings-version">—</span> · <a data-link="github" target="_blank" rel="noopener">Source</a></p>
+  </div>
+</dialog>
+
+<dialog class="modal" id="room" aria-labelledby="room-title">
+  <div class="modal-body room-body">
+    <header class="settings-head">
+      <h2 id="room-title">Watch together</h2>
+      <button class="icon-btn" type="button" data-room-close aria-label="Close">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+
+    <div class="room-tabs" role="tablist" aria-label="Session">
+      <button type="button" role="tab" data-room-tab="host" aria-selected="true">Host a session</button>
+      <button type="button" role="tab" data-room-tab="join" aria-selected="false">Join a session</button>
+    </div>
+
+    <section data-room-pane="host">
+      <p>Start a session and give your friends the code. They join from their own Koma — the video keeps streaming on both machines, so nobody waits on anybody's connection but their own.</p>
+      <button class="btn btn-primary btn-sm" type="button" data-room-create>Create session</button>
+      <div class="room-live" data-room-live="host" hidden>
+        <p class="room-label">Session code</p>
+        <p class="room-code" data-room-code>------</p>
+        <p class="room-link" data-room-link></p>
+        <div class="room-actions">
+          <button class="btn btn-ghost btn-sm" type="button" data-room-copy>Copy invite</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-room-end>End session</button>
+        </div>
+        <p class="room-members-label" data-room-members-label>Nobody has joined yet</p>
+        <ul class="room-members" data-room-members hidden></ul>
+      </div>
+    </section>
+
+    <section data-room-pane="join" hidden>
+      <p>Type the code your friend gave you. Koma finds their machine on this network by itself.</p>
+      <label class="field"><span class="sr">Session code</span><input data-room-input placeholder="Code, e.g. K7Q4XZ" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="10"></label>
+      <p class="modal-err" data-room-err hidden></p>
+      <button class="btn btn-primary btn-sm" type="button" data-room-join>Join session</button>
+      <div class="room-live" data-room-live="join" hidden>
+        <p class="room-label">Following session</p>
+        <p class="room-code" data-room-code>------</p>
+        <div class="room-actions">
+          <button class="btn btn-ghost btn-sm" type="button" data-room-leave>Leave session</button>
+        </div>
+        <p class="room-members-label" data-room-members-label>Following the host</p>
+      </div>
+    </section>
+  </div>
+</dialog>
+
+<main id="app" tabindex="-1"></main>
+
+<footer class="foot">
+  <div>
+    <a class="logo" href="/" aria-label="Koma home"><span class="logo-mark"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5.4 4.8v14.4a1 1 0 0 0 1.5.86l11.5-7.2a1 1 0 0 0 0-1.72L6.9 3.94A1 1 0 0 0 5.4 4.8z" fill="currentColor"/></svg></span><span>koma</span></a>
+    <p>Discover anime, follow the weekly schedule and watch every episode right here — subbed or dubbed.</p>
+    <div class="foot-social">
+      <a class="icon-btn" data-link="discord" target="_blank" rel="noopener" title="Koma on Discord" aria-label="Koma on Discord"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M20.317 4.3698a19.7913 19.7913 0 0 0-4.8851-1.5152.0741.0741 0 0 0-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 0 0-.0785-.037 19.7363 19.7363 0 0 0-4.8852 1.515.0699.0699 0 0 0-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 0 0 .0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 0 0 .0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 0 0-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 0 1-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 0 1 .0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 0 1 .0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 0 1-.0066.1276 12.2986 12.2986 0 0 1-1.873.8914.0766.0766 0 0 0-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 0 0 .0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 0 0 .0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 0 0-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg></a>
+      <a class="icon-btn" data-link="github" target="_blank" rel="noopener" title="Koma on GitHub" aria-label="Koma on GitHub"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg></a>
+    </div>
+  </div>
+  <div>
+    <h4>Explore</h4>
+    <nav aria-label="Explore"><a href="/browse?sort=TRENDING_DESC">Trending</a><a href="/browse?sort=SCORE_DESC">Top rated</a><a href="/browse?status=RELEASING">Airing now</a><a href="/schedule">Schedule</a></nav>
+  </div>
+  <div>
+    <h4>You</h4>
+    <nav aria-label="You"><a href="/list">Library</a><a href="/browse">Browse all</a><a href="https://anilist.co" target="_blank" rel="noopener">AniList</a></nav>
+  </div>
+  <p class="fine">Catalog data from AniList. Video from your local streaming servers. Your list and progress are saved in this browser.</p>
+  <p class="foot-ver">
+    <span>Koma <b id="fv-version">—</b></span>
+    <span id="fv-state" class="fv-state checking" role="status">Checking for updates…</span>
+    <button id="fv-update" class="fv-update" type="button" hidden>Get the update</button>
+  </p>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<noscript><p class="wrap">Koma needs JavaScript to load anime listings.</p></noscript>
+</body>
+</html>

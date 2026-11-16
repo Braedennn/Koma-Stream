@@ -95,13 +95,17 @@ export async function browse(root, { query }) {
       if (page === 1) grid.innerHTML = '';
       grid.insertAdjacentHTML('beforeend', d.media.map(a => card(a)).join(''));
       if (page === 1 && !d.media.length) {
-        grid.innerHTML = `<div class="empty-state"><div class="bubble">${icon('search')}</div><h2>No anime match</h2><p>Try removing a filter or searching a shorter title.</p></div>`;
+        grid.innerHTML = `<div class="empty-state"><div class="bubble">${icon('search')}</div><h2>No anime match</h2><p>${state().lang === 'dub' ? 'No dubbed titles here yet — try another filter.' : 'Try removing a filter or searching a shorter title.'}</p></div>`;
       }
-      total = d.pageInfo.total ? `${d.pageInfo.total.toLocaleString()} titles` : '';
+      // A language filter throws most of a page out, so there is no honest count
+      // to show — the label says what the list is instead.
+      const lang = state().lang;
+      total = d.pageInfo.total ? `${d.pageInfo.total.toLocaleString()} titles`
+        : lang === 'dub' ? 'English dub only' : lang === 'sub' ? 'Japanese subtitles' : '';
       paintChips();
       hasNext = d.pageInfo.hasNextPage;
       more.hidden = !hasNext;
-      page++;
+      page = d.pageInfo.next || page + 1;
     } catch (err) {
       if (id !== req) return;
       if (page === 1) errorBox(grid, err, () => load(true));

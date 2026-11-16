@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The plate behind the launcher icon: the same near-white the desktop
+         icon and the site use. -->
+    <color name="koma_plate">#F8F8F8</color>
+    <color name="koma_ink">#242424</color>
+</resources>

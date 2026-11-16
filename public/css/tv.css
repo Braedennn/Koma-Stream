@@ -1,0 +1,888 @@
+/* ---------- Koma on a television ----------
+   The screen is ten feet away and there is a remote, not a mouse. A web page
+   scaled up is still a web page: a top bar with a search box, a footer full
+   of links, cards the size of business cards. A television app is a different
+   shape - a rail down the side, a cinematic first screen, big pictures, and
+   nothing that waits for a pointer.
+
+   Every rule here is scoped under `html.tv`, so the phone and the desktop
+   app are untouched. */
+
+/* ---------- the shell ---------- */
+
+html.tv {
+  /* No top bar: the head is the rail, and the page starts at the top. */
+  --head-h: 0px;
+  --gut: clamp(36px, 4vw, 96px);
+  --poster-h: 330px;
+  --tv-rail-w: 132px;
+  /* The focus uses the site's own colour - white on the dark theme, black on
+     the light one. It appears as a light around the chosen thing rather than
+     a hard outline drawn over it. */
+  --tv-focus: var(--accent);
+}
+
+/* The television is drawn on a fixed canvas - 1920 pixels wide - and the
+   whole drawing is scaled to the screen, so the picture is the same on every
+   set. The factor is set by the canvas script (public/js/canvas.js): it is a
+   zoom on the root element, which is what makes the browser lay the page out
+   on the canvas and paint it at the size the screen asks for. */
+
+html.tv body {
+  padding-left: var(--tv-rail-w);
+  font-size: 17px;
+}
+
+/* The page furniture a television does not have. */
+html.tv .top,
+html.tv .foot,
+html.tv .scroll-rail { display: none !important; }
+
+/* ---------- the rail ---------- */
+/* A television navigates from a rail down the side: the places to go are
+   always on the screen, so the remote never has to guess where it is. */
+
+.tv-rail {
+  position: fixed;
+  z-index: 70;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--tv-rail-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 24px 12px 20px;
+  background: var(--bg-1);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.tv-rail::-webkit-scrollbar { display: none; }
+
+.tv-rail-logo {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  margin-bottom: 16px;
+  text-decoration: none;
+  color: var(--text);
+}
+.tv-rail-mark {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: var(--primary);
+  color: var(--primary-fg);
+}
+.tv-rail-mark .i { width: 20px; height: 20px; }
+.tv-rail-word {
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+
+.tv-rail-item {
+  position: relative;
+  width: 100%;
+  flex: none;
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  padding: 12px 4px 11px;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: none;
+  color: var(--text-3);
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.1;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color .2s var(--ease-soft), background .2s var(--ease-soft), transform .25s var(--ease-out);
+}
+.tv-rail-item .i { width: 27px; height: 27px; }
+.tv-rail-item:hover { color: var(--text); background: var(--bg-2); }
+.tv-rail-item[aria-current="page"] { color: var(--text); background: var(--bg-2); }
+.tv-rail-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 4px;
+  height: 30px;
+  margin-top: -15px;
+  border-radius: 0 4px 4px 0;
+  background: var(--text);
+}
+.tv-rail-gap { flex: 1 1 auto; min-height: 16px; }
+
+/* The focus on the rail does not shout: it fills the item and lifts it a
+   little, the way a set-top box marks what is selected. */
+html.tv .tv-rail-item:is(:focus, .tv-focus) {
+  outline: none;
+  background: var(--bg-3);
+  color: var(--text);
+  transform: translateX(3px);
+}
+
+/* ---------- the focus ---------- */
+/* The site softens the focus ring for the mouse. On a television the focus is
+   the only thing telling the viewer where they are, so it is unmistakable -
+   but it is not another white box drawn around the thing. The focused item
+   brightens and gives off a light instead.
+
+   The mark is a class as well as a pseudo-class: a WebView that does not
+   hold the window's focus never matches :focus, and the viewer would be
+   left with no sign at all. */
+html.tv {
+  --tv-focus: var(--accent);
+  --tv-focus-gap: var(--bg);
+  --tv-focus-glow: 0 0 16px var(--accent-soft), 0 0 42px var(--accent-soft);
+}
+html.tv :is(a, button, input, select, textarea, [tabindex]):is(:focus, .tv-focus) {
+  outline: none;
+  box-shadow: none;
+  color: var(--text);
+  filter: brightness(1.14) drop-shadow(0 0 12px color-mix(in srgb, var(--accent) 32%, transparent));
+}
+/* A button with a fill of its own: the fill is the mark. Nothing is drawn
+   around it - a white line outside a white button is a white box, and that
+   is the thing the television must not have. */
+html.tv .btn:is(:focus, .tv-focus) {
+  outline: none;
+  background: var(--accent);
+  color: var(--accent-on);
+  border-color: transparent;
+  box-shadow: none;
+}
+/* The button that is already filled turns hollow: it keeps the page's ground
+   and glows instead of gaining a hard edge. */
+html.tv .btn-primary:is(:focus, .tv-focus) {
+  background: var(--bg);
+  color: var(--text);
+  border-color: transparent;
+  box-shadow: var(--tv-focus-glow);
+}
+html.tv .icon-btn:is(:focus, .tv-focus) {
+  outline: none;
+  background: var(--accent);
+  color: var(--accent-on);
+  box-shadow: none;
+}
+/* The tab bar: the focused tab brightens instead of becoming a box floating
+   over the page. */
+html.tv .tab:is(:focus, .tv-focus) {
+  outline: none;
+  color: var(--text);
+  background: var(--accent-soft);
+  box-shadow: var(--tv-focus-glow);
+  border-radius: var(--r-sm);
+}
+/* The rows of the watch order and the season buttons: filled in, because
+   they are rows of paper, not lines of text. */
+html.tv .wo-row:is(:focus, .tv-focus),
+html.tv .season-pills a:is(:focus, .tv-focus) {
+  outline: none;
+  background: var(--bg-3);
+  box-shadow: var(--tv-focus-glow);
+}
+html.tv .genre:is(:focus, .tv-focus) {
+  outline: none;
+  background: var(--accent);
+  color: var(--accent-on);
+  border-color: transparent;
+}
+html.tv .poster:is(:focus, .tv-focus) {
+  outline: none;
+  box-shadow: var(--tv-focus-glow);
+}
+/* The artwork lifts a little when it has the focus - but only a little: it
+   has to keep clear of the title above it. */
+html.tv .card:is(:focus-within, .tv-focus) .poster-wrap { transform: translateY(-4px) scale(1.02); }
+html.tv .card:is(:focus-within, .tv-focus) .poster img { transform: scale(1.04); }
+
+/* ---------- nothing waits for a pointer ---------- */
+html.tv .rail-btn { display: none; }          /* the scroll arrows are hover-only */
+html.tv .quick,
+html.tv .card-x { display: none; }           /* the card menu carries that now */
+html.tv .card-hover { display: none; }        /* the hover strip has no meaning */
+html.tv .preview,
+html.tv .preview-strip { display: none !important; }
+html.tv * { cursor: default !important; }
+
+/* ---------- the search screen ---------- */
+/* A television cannot type into a box in the corner: the search is a screen
+   of its own, with the results under the field for the pad to walk. */
+
+.tv-search {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+.tv-search::backdrop { background: rgba(0, 0, 0, .8); }
+.tv-search[open] { display: flex; flex-direction: column; animation: none; }
+
+.tv-search-head {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 30px var(--gut);
+  border-bottom: 1px solid var(--line);
+}
+.tv-search-field {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+  height: 72px;
+  padding: 0 26px;
+  background: var(--bg-2);
+  border: 2px solid var(--line-2);
+  border-radius: var(--r-lg);
+  transition: border-color .16s var(--ease), box-shadow .16s var(--ease);
+}
+.tv-search-field .i { width: 30px; height: 30px; color: var(--text-3); }
+.tv-search-field input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: none;
+  outline: none;
+  font-size: 30px;
+  font-weight: 600;
+}
+.tv-search-field:focus-within { border-color: var(--accent); box-shadow: var(--tv-focus-glow); }
+.tv-search-close { width: 64px; height: 64px; }
+.tv-search-close .i { width: 28px; height: 28px; }
+
+.tv-search-body { flex: 1; min-height: 0; overflow-y: auto; padding: 30px var(--gut) 70px; }
+.tv-search-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 34px 24px;
+}
+.tv-search-empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-3);
+  font-size: 20px;
+}
+.tv-search-empty .i { width: 24px; height: 24px; }
+.tv-search-all {
+  margin-top: 42px;
+  height: 60px;
+  padding: 0 30px;
+  font-size: 19px;
+  gap: 10px;
+}
+.tv-search-all .i { width: 22px; height: 22px; }
+
+/* ---------- bigger everything ---------- */
+html.tv .nav a { font-size: 16px; padding: 10px 14px; }
+html.tv .nav a[aria-current="page"] { font-size: 16px; }
+html.tv .logo span { font-size: 19px; }
+html.tv .section-title { font-size: clamp(28px, 2.4vw, 40px); }
+html.tv .section-title span { font-size: 17px; }
+html.tv .card-title { font-size: 20px; line-height: 1.3; margin-top: 13px; -webkit-line-clamp: 3; }
+html.tv .card-meta { font-size: 16px; margin-top: 5px; }
+html.tv .btn { height: 54px; padding: 0 24px; font-size: 18px; gap: 9px; }
+html.tv .btn .i { width: 21px; height: 21px; }
+html.tv .btn-sm { height: 46px; padding: 0 18px; font-size: 16px; }
+html.tv .btn-sm .i { width: 18px; height: 18px; }
+html.tv .icon-btn { width: 52px; height: 52px; }
+html.tv .icon-btn .i { width: 25px; height: 25px; }
+html.tv .chip { font-size: 16px; height: 34px; padding: 0 16px; }
+html.tv .chip .i { width: 16px; height: 16px; }
+
+/* The rails: the cards keep their size and the row shows as many as fit.
+   Six cards across a 1080p set is comfortable; the same six on a smaller set
+   are postage stamps, and the name under a postage stamp is a word at a time.
+   So the card is the thing that is fixed, and the screen decides how many of
+   them there is room for. */
+html.tv .rail { --gap: 26px; }
+html.tv .track { grid-auto-columns: clamp(168px, 13vw, 300px); }
+html.tv .rail.wide .track { grid-auto-columns: clamp(240px, 22vw, 440px); }
+html.tv .track { padding-top: 12px; padding-bottom: 18px; }
+html.tv .poster { border-width: 2px; }
+/* When the focus moves, the card it lands on is brought fully into view -
+   and with room over it, so the mark is never cut off by the top of the
+   screen and the card never reaches up into the title above it. The room
+   under it is the name of the show: the title sits below the artwork, and a
+   name cut off by the bottom edge is a name nobody can read. The name may
+   run to three lines, so the room under it is three lines deep. */
+html.tv .poster, html.tv .card-title, html.tv .ep-item a { scroll-margin: 56px 16px 112px 16px; }
+html.tv .badge { height: 30px; font-size: 15px; padding: 0 11px; }
+html.tv .badge.score .i { width: 14px; height: 14px; }
+html.tv .aud { height: 28px; font-size: 15px; padding: 0 10px; }
+html.tv .aud .i { width: 14px; height: 14px; }
+
+/* There is no play button on a poster on a television. The middle button of
+   the remote plays the show, and a circle in the middle of the artwork is a
+   mouse thing - it covers the picture the viewer is aiming at. */
+html.tv .play-hint { display: none; }
+
+/* ---------- the type floor ---------- */
+/* A television is read from the sofa. The site sets plenty of text small for
+   a phone held in the hand; on a set that is ten feet away those words have
+   to be bigger, so the floor is lifted here. The labels, the numbers and the
+   captions are the ones that go unread first. */
+html.tv .take-label { font-size: 15px; }
+html.tv .take-val { font-size: 15px; }
+html.tv .page-head p,
+html.tv .page-head .sub { font-size: 17px; }
+html.tv .select-btn { font-size: 15px; height: 46px; }
+html.tv .select-btn small { font-size: 15px; }
+html.tv .opt { font-size: 15px; }
+html.tv .opt-empty { font-size: 15px; }
+html.tv .switch { font-size: 15px; }
+html.tv .active-filters { font-size: 15px; }
+html.tv .chip-x { font-size: 15px; height: 32px; }
+html.tv .clear { font-size: 15px; }
+html.tv .sel-chip { font-size: 14px; height: 26px; }
+html.tv .pill { font-size: 14px; height: 30px; }
+html.tv .day-btn small { font-size: 14px; }
+html.tv .day-btn .n { font-size: 14px; }
+html.tv .sched-tools { font-size: 15px; }
+html.tv .slot small { font-size: 15px; }
+html.tv .filter-tabs button { font-size: 15px; height: 40px; }
+html.tv .filter-tabs button small { font-size: 14px; }
+html.tv .ep-tag { font-size: 14px; height: 28px; }
+html.tv .ep-item b, html.tv .ep-item .no { font-size: 15px; }
+html.tv .ep-item small { font-size: 14px; }
+html.tv .role { font-size: 15px; }
+html.tv .role small { font-size: 15px; }
+html.tv .count { font-size: 13px; min-width: 22px; height: 22px; }
+/* The audio badge - how many episodes come with subtitles and how many are
+   dubbed - is set small by the site; the numbers are the point of it. */
+html.tv .chip.aud-chips .aud { font-size: 15px; height: 30px; }
+html.tv .kp-audio button small { font-size: 14px; }
+
+/* The search field of the browse page is a phone thing: a television has
+   its own search screen, and a remote cannot type into a box in the corner.
+   The filters - the drop-downs - stay: the middle button opens them. */
+html.tv .filter-bar .field { display: none; }
+
+/* ---------- the spotlight ---------- */
+/* The first thing on a television is a poster the size of the screen, not a
+   card in a corner. The backdrop is the artwork, darkened; the words sit on
+   top of it. */
+html.tv .hero { position: relative; padding: 0; }
+html.tv .hero-inner { position: relative; max-width: none; margin: 0; }
+html.tv .slide { position: relative; }
+html.tv .slide.on {
+  grid-template-columns: minmax(0, 1fr) clamp(420px, 31vw, 620px);
+  align-items: center;
+  gap: clamp(32px, 4vw, 80px);
+  min-height: clamp(440px, 52vh, 620px);
+  padding: clamp(36px, 4vw, 68px) var(--gut) clamp(56px, 5vw, 84px);
+}
+html.tv .hero-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: var(--bg-1);
+}
+html.tv .hero-backdrop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 22%;
+}
+html.tv .hero-backdrop.has-banner img { filter: brightness(.48) saturate(1.1); }
+html.tv .hero-backdrop.has-cover img { filter: blur(42px) brightness(.42) saturate(1.15); transform: scale(1.18); }
+html.tv .hero-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, .95) 0%, rgba(0, 0, 0, .82) 34%, rgba(0, 0, 0, .3) 68%, rgba(0, 0, 0, .62) 100%),
+    linear-gradient(0deg, #000 1%, transparent 46%);
+}
+html.tv .hero-body { position: relative; z-index: 2; }
+html.tv .hero-figure {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3);
+}
+html.tv .hero-figure.cover { aspect-ratio: 2 / 3; width: clamp(210px, 17vw, 300px); justify-self: end; }
+
+html.tv .hero-badge { height: 32px; padding: 0 14px; font-size: 15px; gap: 7px; }
+html.tv .hero-badge .i { width: 15px; height: 15px; }
+html.tv .hero-title { font-size: clamp(38px, 4.6vw, 82px); line-height: 1.04; max-width: 16ch; }
+html.tv .hero-meta { font-size: 18px; gap: 6px 16px; margin-top: 12px; }
+html.tv .hero-meta .i { width: 16px; height: 16px; }
+/* The phone hides the synopsis to keep the first screen short. A television
+   has the room, and the words are what the viewer reads from the sofa. */
+html.tv .hero-sub {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 58ch;
+  margin-top: 16px;
+  color: var(--text-2);
+  font-size: 19px;
+  line-height: 1.6;
+}
+html.tv .hero-actions { gap: 14px; margin-top: 24px; }
+html.tv .hero-actions .btn { height: 60px; padding: 0 30px; font-size: 20px; gap: 10px; }
+html.tv .hero-actions .btn .i { width: 24px; height: 24px; }
+/* The arrows sit in the corner of the picture, not under it: the space under
+   the words belongs to the backdrop. */
+html.tv .hero-ctrl {
+  position: absolute;
+  right: var(--gut);
+  bottom: clamp(18px, 2vw, 30px);
+  gap: 14px;
+  margin-top: 0;
+  z-index: 3;
+}
+html.tv .hero-ctrl .icon-btn { width: 56px; height: 56px; }
+html.tv .hero-ctrl .icon-btn .i { width: 28px; height: 28px; }
+/* The dots go - the slide moves on its own - but the arrows stay, so the
+   viewer can pick the show. */
+html.tv .dots { display: none; }
+
+html.tv .rows { gap: 56px; padding: clamp(24px, 3vw, 48px) 0 96px; }
+/* The title of a row sits above its cards with room between them: the
+   artwork lifts a little when the pad lands on it, and it has to keep clear
+   of the words above. */
+html.tv .row-head { margin-bottom: 34px; }
+html.tv .link-btn { font-size: 18px; }
+html.tv .link-btn .i { width: 20px; height: 20px; }
+/* "View all" is a quiet label, not a card. On the television it lights up
+   when it has the focus instead of wearing a box like the artwork around it. */
+html.tv .link-btn:is(:focus, .tv-focus) {
+  outline: none;
+  box-shadow: none;
+  color: var(--text);
+  animation: tv-view-all-glow 1.5s var(--ease-soft) infinite;
+}
+html.tv .link-btn:is(:focus, .tv-focus) .i {
+  color: var(--accent);
+  animation: tv-view-all-arrow 1.5s var(--ease-soft) infinite;
+}
+@keyframes tv-view-all-glow {
+  0%, 100% { color: var(--text); text-shadow: 0 0 0 transparent; }
+  50% { color: var(--accent); text-shadow: 0 0 22px var(--accent-soft); }
+}
+@keyframes tv-view-all-arrow {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(5px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html.tv .link-btn:is(:focus, .tv-focus),
+  html.tv .link-btn:is(:focus, .tv-focus) .i { animation: none; }
+}
+
+/* ---------- the detail page ---------- */
+html.tv .d-hero {
+  min-height: clamp(440px, 54vh, 660px);
+  padding: clamp(40px, 5vw, 80px) var(--gut) clamp(40px, 4vw, 64px);
+}
+/* The banner is a photograph, not a backdrop: on a television it needs a
+   scrim over the top of it as well as the bottom, or the breadcrumb is read
+   against whatever the art happens to be doing up there. */
+html.tv .d-backdrop::after {
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, .9) 0%, rgba(0, 0, 0, .45) 20%, transparent 40%),
+    linear-gradient(0deg, var(--hero-fade) 2%, var(--hero-fade-2) 48%, transparent 100%),
+    linear-gradient(90deg, var(--hero-fade-2), transparent 70%);
+}
+html.tv .d-head { grid-template-columns: clamp(240px, 20vw, 340px) minmax(0, 1fr); gap: clamp(32px, 4vw, 72px); }
+html.tv .d-poster { width: 100%; }
+html.tv .d-info h1 { font-size: clamp(40px, 4.8vw, 84px); }
+html.tv .d-alt { font-size: 21px; margin-top: 10px; }
+/* The breadcrumb is a row of little arrows that only a mouse has a use for;
+   the rail down the side is where a television goes back to. */
+html.tv .crumbs { display: none; }
+html.tv .d-syn {
+  font-size: 19px;
+  line-height: 1.7;
+  max-width: 78ch;
+  margin-top: 22px;
+  /* The words are a lot for a screen read from the sofa: four lines say what
+     the show is, and the room they take is room the buttons need. The rest of
+     it is in the Overview tab. */
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+html.tv .d-actions { gap: 14px; margin-top: 30px; }
+html.tv .d-actions .btn { height: 58px; padding: 0 30px; font-size: 19px; }
+html.tv .d-actions .btn .i { width: 23px; height: 23px; }
+html.tv .chips { gap: 10px; margin-top: 22px; }
+/* "My take" - the score, the rewatches, the tags, the note - is not on the
+   television at all: it wants a keyboard, and the page has a button to watch
+   the show on. */
+html.tv .tabs { top: 0; gap: 30px; }
+html.tv .tab { height: 62px; font-size: 19px; gap: 9px; }
+html.tv .tab small { font-size: 14px; }
+html.tv .panel { padding: 40px var(--gut) 96px; }
+html.tv .overview { grid-template-columns: minmax(0, 1fr) 420px; gap: 36px; }
+html.tv .box { padding: 30px; }
+html.tv .box h3 { font-size: 19px; margin-bottom: 16px; }
+html.tv .facts { font-size: 17px; gap: 12px 20px; }
+html.tv .platform { padding: 15px 18px; font-size: 16px; }
+html.tv .ep-grid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
+html.tv .ep-body { padding: 16px 18px 18px; }
+html.tv .ep-body b { font-size: 17px; }
+html.tv .ep-body small { font-size: 14px; }
+html.tv .ep-tools { font-size: 16px; }
+html.tv .genre-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+html.tv .genre { height: 74px; font-size: 19px; padding: 0 22px; }
+
+/* ---------- the watch page ---------- */
+/* On a television the video is the page. The picture takes the whole screen
+   and the things that belong to it live in a band under it, the way a
+   set-top box draws them - the pad has to be able to reach the buttons at
+   the bottom of the picture without the page having to scroll. */
+html.tv {
+  /* The band under the picture: its height is the room the picture does not
+     get. A tall screen can afford a tall band; a short one cannot. */
+  --tv-band-h: clamp(68px, 9.5vh, 92px);
+  --tv-band-btn: clamp(40px, 7vh, 48px);
+}
+html.tv .watch { padding: 0; gap: 0; max-width: none; }
+html.tv .watch .crumbs { display: none; }
+/* The switch between the episode and its trailer is another action, and on a
+   television the picture gets the whole screen. */
+html.tv .watch > .seg { display: none; }
+html.tv .watch-grid {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "player" "bar";
+  gap: 0;
+}
+html.tv .watch-grid > .ep-panel { display: none; }
+/* The block under the picture - the poster, the synopsis - is the phone's
+   layout. On a television the picture says all of it, and the band under it
+   carries the actions. */
+html.tv .watch-grid > .watch-info { display: none; }
+html.tv .player-shell {
+  --player-max-h: calc(100vh - var(--tv-band-h));
+  width: min(100%, calc(var(--player-max-h) * var(--ar)));
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+}
+html.tv .player-bar {
+  flex-wrap: nowrap;
+  height: var(--tv-band-h);
+  margin: 0;
+  padding: 0 var(--gut);
+  gap: 18px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--line);
+}
+html.tv .player-bar .btn { height: var(--tv-band-btn); padding: 0 18px; font-size: 16px; gap: 8px; }
+html.tv .player-bar .btn .i { width: 19px; height: 19px; }
+html.tv .player-bar .pb-left,
+html.tv .player-bar .pb-right { flex-wrap: nowrap; gap: 10px; }
+/* The autoplay and the skip are in the player's own menu on a television:
+   the band under the picture is for what the viewer reaches for. */
+html.tv .player-bar [data-pref] { display: none; }
+/* On a narrow set there is no room for everything: watching together needs
+   a code typed on a keyboard, so it is the one that goes. */
+@media (max-width: 1150px) {
+  html.tv .player-bar [data-room-open] { display: none; }
+}
+
+/* A television that is not tall - a set low in a cabinet, or one that reports
+   a short screen - cannot hold the whole spotlight and its buttons. The words
+   are cut short and the room under them is taken away, so the button the
+   viewer came for stays on the screen instead of hanging below the edge. */
+@media (max-height: 520px) {
+  html.tv .slide.on { padding-bottom: 28px; }
+  html.tv .hero-sub { -webkit-line-clamp: 2; }
+  html.tv .d-hero { padding-bottom: 28px; }
+  html.tv .d-syn { -webkit-line-clamp: 3; }
+  /* The tags are a list of names for a show, and on a short screen they are
+     the room the buttons need: the genres are in the panel below anyway. */
+  html.tv .d-hero .chips { display: none; }
+}
+
+/* The audio switch wears the page's colours here, not the picture's: it is
+   under the picture now. The shape is the one it always had. */
+html.tv .player-bar .kp-audio {
+  margin: 0 4px;
+  padding: 4px;
+  background: var(--bg-2);
+  border-color: var(--line-2);
+}
+html.tv .player-bar .kp-audio button {
+  height: clamp(32px, 5.4vh, 42px);
+  padding: 0 18px;
+  font-size: 15px;
+  line-height: clamp(32px, 5.4vh, 42px);
+  color: var(--text-2);
+}
+html.tv .player-bar .kp-audio button small { font-size: 14px; }
+html.tv .player-bar .kp-audio button[aria-pressed="true"] { background: var(--accent); color: var(--accent-on); }
+html.tv .player-bar .kp-audio button:hover:not([aria-pressed="true"]) { color: var(--text); background: var(--bg-3); }
+
+/* ---------- the player ---------- */
+/* The controls go away when the viewer is not using the remote - a
+   television shows the picture, not a picture with a toolbar over it. Any
+   key brings them back. The page's own rule does the fading; the
+   television only asks for a little longer before it happens, because a
+   remote is pressed less often than a mouse is moved. */
+
+/* The picture takes the whole screen: the full screen button has to mean
+   what it says. The rule above sets the width and the shape of the picture
+   for the page, and the page's rule is the stronger one, so the full screen
+   has to say it again - or the picture stays the size of the page and the
+   band under it climbs to the top of the screen. */
+html.tv .player-shell.fs-video {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  margin: 0;
+  aspect-ratio: auto;
+}
+/* Nothing else is on the screen when the picture is: not the rail, not the
+   band under the picture, not the page's own furniture. */
+html.fs-video .tv-rail,
+html.fs-video .player-bar { display: none; }
+html.fs-video body { padding-left: 0; }
+/* The picture in full screen: the whole frame, with the artwork of the
+   episode around it - the shared rule in koma.css does the work, and the
+   television only asks for the same thing. */
+
+/* The picture is the page, so the controls are a band at the bottom of it:
+   a solid ground, big targets, and the focused one filled in. A white box
+   drawn around a round button on a dark picture looks like a piece of paper
+   somebody left there. */
+html.tv .kplayer { container-type: inline-size; }
+html.tv .kp-top {
+  padding: 24px 28px 48px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, .8), rgba(0, 0, 0, 0));
+}
+html.tv .kp-now h3 { font-size: 24px; }
+html.tv .kp-now p { font-size: 18px; margin-top: 4px; }
+html.tv .kp-bottom {
+  padding: 28px 26px 18px;
+  background: linear-gradient(0deg, rgba(0, 0, 0, .92) 52%, rgba(0, 0, 0, 0));
+}
+html.tv .kp-rail { height: 8px; }
+html.tv .kp-scrub { padding: 14px 4px; }
+html.tv .kp-knob { width: 20px; height: 20px; margin: -10px 0 0 -10px; }
+/* There is no mouse to hover over the time line, so the knob is always out:
+   the knob is where the picture is, and the viewer has to be able to see it.
+   When the time line has the focus it grows and takes a white edge - not a
+   box around it, which is what the other controls refuse to have. */
+html.tv .kp-knob { transform: scale(1); }
+html.tv .kp-scrub:is(:focus, .tv-focus) { outline: none; box-shadow: none; }
+html.tv .kp-scrub:is(:focus, .tv-focus) .kp-rail {
+  height: 12px;
+  background: rgba(255, 255, 255, .38);
+}
+html.tv .kp-scrub:is(:focus, .tv-focus) .kp-knob {
+  transform: scale(1.25);
+  box-shadow: 0 0 12px rgba(255, 255, 255, .8), 0 0 32px rgba(255, 255, 255, .42);
+}
+html.tv .kp-row { margin-top: 12px; gap: 14px; }
+html.tv .kp-ic { width: 60px; height: 60px; }
+html.tv .kp-ic .i { width: 30px; height: 30px; }
+/* The mark on a control of the picture is a light and never a white box: the
+   controls sit on the show, and a white square drawn over the picture is the
+   thing a television must not have - the full screen button was the worst
+   of it, because that is the button everybody presses. */
+html.tv .kp-ic:is(:focus, .tv-focus) {
+  outline: none;
+  background: rgba(255, 255, 255, .16);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(255, 255, 255, .72), 0 0 34px rgba(255, 255, 255, .34);
+}
+html.tv .kp-time { font-size: 20px; margin: 0 16px; }
+/* There is no volume on the picture of a television. The set has a volume,
+   the remote has volume keys, and the app plays into it - a slider with a
+   knob on it is a mouse thing, and it is the most PC-looking thing a
+   television can have on its screen. */
+html.tv .kp-vol { display: none; }
+html.tv .kp-bigplay { width: 112px; height: 112px; }
+html.tv .kp-bigplay .i { width: 48px; height: 48px; }
+html.tv .kp-resume { gap: 26px; }
+html.tv .kp-resume h4 { font-size: 32px; }
+html.tv .kp-resume-go { padding: 16px 34px; font-size: 19px; }
+html.tv .kp-resume-start { padding: 15px 28px; font-size: 19px; }
+html.tv .kp-busy-note { font-size: 17px; }
+html.tv .kp-error h3 { font-size: 26px; }
+html.tv .kp-error p { font-size: 18px; }
+html.tv .kp-state { padding: 10px 20px; font-size: 16px; }
+html.tv .kp-skipbtn { right: 28px; bottom: 148px; height: 52px; padding: 0 26px; font-size: 18px; }
+html.tv .kp-nextcard { right: 28px; bottom: 148px; padding: 16px 18px; }
+html.tv .kp-next-info b { font-size: 17px; max-width: 300px; }
+html.tv .kp-next-count { width: 54px; height: 54px; }
+html.tv .kp-next-count svg { width: 54px; height: 54px; }
+html.tv .kp-next-count b { font-size: 17px; }
+html.tv .kp-menu { right: 26px; bottom: 104px; width: 380px; padding: 9px; }
+html.tv .kp-sec h5 { font-size: 13px; margin: 7px 11px; }
+html.tv .kp-menu [role="menuitemradio"] { padding: 12px 14px; font-size: 18px; }
+/* The menu is on the picture, so it is marked the way the picture is: the
+   focused row is filled in. */
+html.tv .kp-menu [role="menuitemradio"]:is(:focus, .tv-focus) {
+  outline: none;
+  background: #fff;
+  color: #0B0B0B;
+}
+html.tv .kp-menu [role="menuitemradio"]:is(:focus, .tv-focus) .i { color: #0B0B0B; }
+html.tv .kp-menu .kp-speeds [role="menuitemradio"] { height: 42px; font-size: 16px; }
+html.tv .kp-toggle { padding: 12px 14px; font-size: 18px; }
+/* The switches in the menu: the mark goes on the row, not on the invisible
+   box the browser keeps for the check. */
+html.tv .kp-toggle input:is(:focus, .tv-focus) { outline: none; box-shadow: none; }
+html.tv .kp-toggle:has(input:is(:focus, .tv-focus)) { background: rgba(255, 255, 255, .18); color: #fff; }
+html.tv .kp-drawer { width: min(480px, 62%); }
+html.tv .kp-drawer header { padding: 18px 16px 14px; }
+html.tv .kp-drawer h4 { font-size: 21px; }
+html.tv .kp-x { width: 44px; height: 44px; }
+html.tv .kp-x .i { width: 22px; height: 22px; }
+html.tv .kp-ep-item { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 12px; padding: 13px 11px; }
+html.tv .kp-ep-item span { font-size: 16px; }
+html.tv .kp-ep-item b { font-size: 15px; }
+html.tv .kp-ep-item:is(:focus, .tv-focus) {
+  outline: none;
+  background: #fff;
+  color: #0B0B0B;
+  box-shadow: none;
+}
+html.tv .kp-ep-item:is(:focus, .tv-focus) b,
+html.tv .kp-ep-item:is(:focus, .tv-focus) span { color: #0B0B0B; }
+html.tv .kp-ep-season { font-size: 14px; }
+/* The full screen has its own size for the controls; on a television they
+   stay as big as they are in the page. */
+html.tv .kplayer.is-full .kp-ic { width: 64px; height: 64px; }
+html.tv .kplayer.is-full .kp-ic .i { width: 32px; height: 32px; }
+html.tv .kplayer.is-full .kp-now h3 { font-size: 28px; }
+html.tv .kplayer.is-full .kp-bottom { padding-bottom: 24px; }
+html.tv .kplayer.is-full .kp-skipbtn,
+html.tv .kplayer.is-full .kp-nextcard { bottom: 168px; }
+
+/* A narrow picture gets smaller controls: a set-top box on an old television
+   has room for four buttons, not nine, and the ones at the end must not be
+   pushed off the picture. */
+@container (max-width: 900px) {
+  html.tv .kp-ic { width: 50px; height: 50px; }
+  html.tv .kp-ic .i { width: 25px; height: 25px; }
+  html.tv .kp-time { font-size: 17px; margin: 0 10px; }
+  html.tv .kp-row { gap: 8px; }
+}
+@container (max-width: 700px) {
+  html.tv .kp-ic { width: 44px; height: 44px; }
+  html.tv .kp-ic .i { width: 22px; height: 22px; }
+  html.tv .kp-time .kp-dur { display: none; }
+  html.tv .kp-time { font-size: 16px; margin: 0 8px; }
+}
+
+/* The player's own menu - the gear. The rows are big enough to point at from
+   the sofa, and the focus is a filled row, not a box around it. */
+html.tv .kp-menu { right: 24px; bottom: 96px; width: 360px; max-height: min(520px, calc(100% - 120px)); padding: 10px; }
+html.tv .kp-menu h5 { font-size: 15px; }
+html.tv .kp-menu [role="menuitemradio"] { padding: 12px 14px; font-size: 19px; }
+html.tv .kp-menu .kp-speeds [role="menuitemradio"] { height: 42px; font-size: 17px; }
+html.tv .kp-menu [role="menuitemradio"]:is(:focus, .tv-focus) { background: var(--accent-2); color: var(--accent-on-2); }
+html.tv .kp-menu [role="menuitemradio"]:is(:focus, .tv-focus) .i { color: var(--accent-on-2); opacity: 1; }
+
+/* ---------- the panels ---------- */
+html.tv .modal {
+  left: var(--tv-rail-w);
+  right: 0;
+  width: min(900px, calc(100vw - var(--tv-rail-w) - 90px));
+  border-radius: var(--r-xl);
+}
+html.tv .modal-body { padding: 40px; gap: 24px; }
+/* The settings panel is its own little page: the head stays at the top of it
+   and the groups scroll under it. The padding the other panels get would
+   open a gap above the head, and the content of the panel would scroll
+   through that gap - which is what a broken head looks like. */
+html.tv .settings-body { padding: 0; }
+html.tv .settings-head { padding: 22px 40px; }
+html.tv .settings-group { padding: 26px 40px; }
+html.tv .modal h2, html.tv .modal h3 { font-size: 30px; }
+html.tv .modal p, html.tv .modal li { font-size: 19px; line-height: 1.6; }
+html.tv .modal .field input { height: 54px; font-size: 19px; }
+html.tv .modal .field { max-width: none; }
+html.tv .settings-row { font-size: 19px; padding: 12px 0; }
+/* The playback switches use a real checkbox hidden behind the knob. The
+   television points at the labelled row, and the knob carries the focus so
+   the setting can be changed without hunting for a one-pixel input. */
+html.tv .settings-toggle {
+  border-radius: var(--r-sm);
+  outline: none;
+  box-shadow: none;
+}
+html.tv .settings-toggle:is(:focus, .tv-focus) {
+  outline: none;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text);
+}
+html.tv .settings-toggle:is(:focus, .tv-focus) .knob {
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 62%, transparent),
+              0 0 30px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+html.tv .settings-note { font-size: 16px; }
+html.tv .seg-ctl button { height: 56px; font-size: 18px; }
+/* The language chips: the focused chip lights up, so the chip that is picked
+   and the chip that has the focus can both be seen. */
+html.tv .lang-list button { height: 50px; padding: 0 22px; font-size: 18px; }
+html.tv .lang-list button:is(:focus, .tv-focus) {
+  outline: none;
+  box-shadow: var(--tv-focus-glow);
+}
+html.tv .switch .knob { width: 48px; height: 27px; }
+html.tv .switch .knob::after { width: 21px; height: 21px; }
+html.tv .switch input:checked + .knob::after { transform: translateX(21px); }
+html.tv .room-code { font-size: 44px; letter-spacing: .1em; }
+
+/* ---------- the card menu ---------- */
+.tv-menu-list { display: grid; gap: 10px; }
+.tv-menu-item {
+  width: 100%;
+  min-height: 62px;
+  padding: 0 22px;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--bg-2);
+  color: var(--text);
+  font: 600 20px var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+.tv-menu-item:hover { background: var(--bg-3); }
+.tv-menu-item:is(:focus, .tv-focus) {
+  outline: none;
+  background: var(--bg-3);
+  box-shadow: var(--tv-focus-glow);
+}
+
+/* The television does not need a set of rules for a very big screen. The
+   canvas is fixed and the drawing is scaled to the set, so a 4K television
+   shows the same picture as a 1080p one - the same proportions, the same
+   spacing, drawn at the size its own screen asks for. */

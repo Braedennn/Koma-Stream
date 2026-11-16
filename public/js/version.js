@@ -3,8 +3,8 @@
 // version and the update check — so it answers in one call. In a plain browser tab
 // there's no running app to ask, so all we can report is the newest release.
 import { $ } from './ui.js';
+import { REPO } from './links.js';
 
-const REPO = 'Braedennn/Koma-Stream';
 const CACHE_KEY = 'koma.release.v1';   // what the newest release was, and when we saw it
 const CACHE_MS = 10 * 60e3;
 
@@ -25,6 +25,11 @@ export function initVersion() {
   const verEl = $('#fv-version');
   const stateEl = $('#fv-state');
   const btn = $('#fv-update');
+  const setVer = v => {
+    verEl.textContent = v;
+    const sv = $('#settings-version');
+    if (sv) sv.textContent = v;
+  };
   if (!verEl || !stateEl) return;
 
   const say = (txt, cls = '') => { stateEl.textContent = txt; stateEl.className = `fv-state ${cls}`; };
@@ -36,7 +41,7 @@ export function initVersion() {
     window.koma.version().then(info => {
       if (!info) return;
       latest = info.latest || null;
-      verEl.textContent = info.current || '—';
+      setVer(info.current || '—');
       if (latest && info.outdated) {
         say(`Update available — ${latest}`, 'outdated');
         btn.hidden = false;
@@ -65,7 +70,7 @@ export function initVersion() {
   }
 
   // A plain browser tab: no app version to report, but the newest release still is.
-  verEl.textContent = 'web';
+  setVer('web');
   btn.hidden = true;
   const known = cachedRelease();
   if (known) {

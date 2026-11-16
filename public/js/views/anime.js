@@ -39,9 +39,23 @@ export async function anime(root, { params: [id], query, alive }) {
   ].filter(Boolean);
   let tab = tabs.some(t => t[0] === query.get('tab')) ? query.get('tab') : 'overview';
 
+  // The backdrop art is drawn at its own proportions and scaled with the
+  // screen, so a phone shows a small strip of it and a wide monitor a wide
+  // one. A cover-fitted banner zoomed in on a narrow screen instead, which
+  // made the picture look bigger the smaller the window got. The blurred copy
+  // behind it keeps the hero filled to the bottom.
+  const art = a.bannerImage || big(a);
+  // A television is not a phone: the page is read from the sofa with a
+  // remote, and the private notes of "My take" want a keyboard. The watch
+  // button is the one action the remote needs - the trailer and the notes
+  // are for the mouse.
+  const tv = document.documentElement.classList.contains('tv');
   root.innerHTML = `
     <section class="d-hero">
-      <div class="d-backdrop${a.bannerImage ? '' : ' cover'}">${img(a.bannerImage || big(a))}</div>
+      <div class="d-backdrop${a.bannerImage ? '' : ' cover'}">
+        <img class="d-fill fade" src="${esc(art)}" alt="" decoding="async">
+        ${a.bannerImage ? `<img class="d-art fade" src="${esc(art)}" alt="" decoding="async">` : ''}
+      </div>
       <div class="d-head">
         <div class="d-poster">${img(big(a), `Cover of ${name(a)}`)}</div>
         <div class="d-info">
@@ -63,9 +77,9 @@ export async function anime(root, { params: [id], query, alive }) {
           <div class="d-actions">
             ${startable ? `<a class="btn btn-primary" href="/watch/${a.id}">${icon('play')}${seen.size ? 'Continue watching' : 'Watch now'}</a>` : ''}
             ${listBtn(a.id)}
-            ${yt ? `<button class="btn btn-ghost" type="button" data-trailer>${icon('film')}Trailer</button>` : ''}
+            ${yt && !tv ? `<button class="btn btn-ghost" type="button" data-trailer>${icon('film')}Trailer</button>` : ''}
           </div>
-          <div class="take" id="take">
+          ${tv ? '' : `<div class="take" id="take">
             <div class="take-head"><h2 class="section-title">My take<span>private to this device</span></h2><span class="take-flash" aria-live="polite"></span></div>
             <div class="take-row">
               <span class="take-label">Score</span>
@@ -80,7 +94,7 @@ export async function anime(root, { params: [id], query, alive }) {
                 <button type="button" data-rew="1" aria-label="One rewatch more">+</button>
               </div>
             </div>
-            <div class="take-row">
+            <div class="take-row take-tags">
               <span class="take-label">Tags</span>
               <div class="tagrow">
                 ${sc.tags.map(tagChip).join('')}
@@ -88,7 +102,7 @@ export async function anime(root, { params: [id], query, alive }) {
               </div>
             </div>
             <textarea class="take-note" rows="2" maxlength="500" placeholder="A private note — what landed, where you dropped it…">${esc(sc.note)}</textarea>
-          </div>
+          </div>`}
         </div>
       </div>
     </section>
@@ -272,45 +286,83 @@ function overview(panel, a) {
 }
 
 const scheduleCache = new Map();
+const stillCache = new Map(); // anilistId -> Map(episode number -> picture the grid was given)
 async function episodes(panel, a, alive) {
   panel.innerHTML = `<div class="ep-grid">${Array.from({ length: 8 }, () => '<div class="sk" style="aspect-ratio:16/12"></div>').join('')}</div>`;
   if (!scheduleCache.has(a.id)) scheduleCache.set(a.id, airingSchedule(a.id).catch(() => []));
   // The episode list of this part comes from Koma: don't hold the tab more than 1.5s for it.
   const [schedule, part] = await Promise.all([scheduleCache.get(a.id),
     Promise.race([sourceEpisodes(a), new Promise(r => setTimeout(() => r(null), 1500))])]);
-  const list = episodeIndex(a, schedule, part?.episodes || [], part?.offset || 0);
-  if (!alive() || !panel.isConnected) return;
-  if (!list.length) {
-    panel.innerHTML = `<nav class="season-pills" aria-label="Seasons" hidden></nav><div class="empty-state"><div class="bubble">${icon('tv')}</div><h2>No episodes yet</h2><p>AniList hasn’t listed episodes for this title. Check back once it starts airing.</p></div>`;
-    seasonPills(panel, a, alive);
-    return;
-  }
-  const seen = watchedSet(a.id);
-  const nextUp = list.find(e => !e.later && !seen.has(e.n))?.n;
-  const pages = Math.ceil(list.length / PAGE);
-  const startPage = nextUp ? Math.floor((nextUp - 1) / PAGE) : 0;
 
-  const draw = p => {
-    $('.ep-grid', panel).innerHTML = list.slice(p * PAGE, p * PAGE + PAGE).map(e => `
-      <a class="ep${e.later ? ' later' : ''}${e.n === nextUp ? ' next-up' : ''}" href="/watch/${a.id}?ep=${e.n}" style="--c:${esc(tint(a))}"${e.later ? ' tabindex="-1" aria-disabled="true"' : ''}>
-        <div class="ep-thumb">
-          ${e.thumb ? img(e.thumb) : `<span class="big-n">${e.n}</span>`}
-          <span class="ep-tag">EP ${e.n}</span>
-          ${seen.has(e.n) ? `<span class="ep-seen" aria-label="Watched">${icon('check')}</span>` : ''}
-          <span class="play-hint">${icon('play')}</span>
-        </div>
-        <div class="ep-body"><b>${esc(e.title || `Episode ${e.n}`)}</b><small>${e.n === nextUp ? 'Up next · ' : ''}${e.at ? esc(when(e.at)) : e.later ? 'Not aired yet' : 'Available'}</small></div>
-      </a>`).join('');
+  let page = null; // the page the viewer is reading, kept across a redraw
+  const render = async given => {
+    const list = episodeIndex(a, schedule, given?.episodes || [], given?.offset || 0);
+    const known = stillCache.get(a.id);
+    if (known) for (const e of list) e.thumb ||= known.get(e.n);
+    if (!alive() || !panel.isConnected) return;
+    if (!list.length) {
+      panel.innerHTML = `<nav class="season-pills" aria-label="Seasons" hidden></nav><div class="empty-state"><div class="bubble">${icon('tv')}</div><h2>No episodes yet</h2><p>AniList hasn’t listed episodes for this title. Check back once it starts airing.</p></div>`;
+      seasonPills(panel, a, alive);
+      return;
+    }
+    const seen = watchedSet(a.id);
+    const nextUp = list.find(e => !e.later && !seen.has(e.n))?.n;
+    const pages = Math.ceil(list.length / PAGE);
+    const startPage = nextUp ? Math.floor((nextUp - 1) / PAGE) : 0;
+    const first = Math.min(page ?? startPage, pages - 1);
+
+    const draw = p => {
+      page = p;
+      $('.ep-grid', panel).innerHTML = list.slice(p * PAGE, p * PAGE + PAGE).map(e => `
+        <a class="ep${e.later ? ' later' : ''}${e.n === nextUp ? ' next-up' : ''}" href="/watch/${a.id}?ep=${e.n}" style="--c:${esc(tint(a))}"${e.later ? ' tabindex="-1" aria-disabled="true"' : ''}>
+          <div class="ep-thumb">
+            ${e.thumb ? img(e.thumb) : `<span class="big-n">${e.n}</span>`}
+            <span class="ep-tag">EP ${e.n}</span>
+            ${seen.has(e.n) ? `<span class="ep-seen" aria-label="Watched">${icon('check')}</span>` : ''}
+            <span class="play-hint">${icon('play')}</span>
+          </div>
+          <div class="ep-body"><b>${esc(e.title || `Episode ${e.n}`)}</b><small>${e.n === nextUp ? 'Up next · ' : ''}${e.at ? esc(when(e.at)) : e.later ? 'Not aired yet' : 'Available'}</small></div>
+        </a>`).join('');
+    };
+
+    panel.innerHTML = `<nav class="season-pills" aria-label="Seasons" hidden></nav><div class="ep-tools"><span>${list.length} episodes · ${seen.size} watched</span>
+        ${pages > 1 ? selectHTML({ name: 'range', label: 'Episodes', any: null, align: 'right', value: String(first),
+          options: Array.from({ length: pages }, (_, i) => [String(i), `${i * PAGE + 1}–${Math.min(list.length, (i + 1) * PAGE)}`]) }) : ''}</div>
+      <div class="ep-grid"></div>`;
+    const sel = $('.select', panel);
+    if (sel) initSelect(sel, v => draw(Number(v)));
+    draw(first);
+    seasonPills(panel, a, alive);
+
+    // The listings only name a handful of episodes, so the rest of the page
+    // would be numbers. The episode database has a still for every one of
+    // them; the page asks for its own range in small chunks, so the pictures
+    // arrive as they are found instead of all waiting on the slowest one.
+    const blank = list.slice(first * PAGE, first * PAGE + PAGE).filter(e => !e.thumb);
+    const map = stillCache.get(a.id) || new Map();
+    for (let i = 0; i < blank.length; i += 10) {
+      if (!alive() || !panel.isConnected) return;
+      const chunk = blank.slice(i, i + 10);
+      const from = chunk[0].n, to = chunk[chunk.length - 1].n;
+      const got = await fetch(`/api/stream/episode-thumbs?anilistId=${a.id}&from=${from}&to=${to}`)
+        .then(r => r.json()).then(d => d.thumbs || {}).catch(() => null);
+      if (!got || !Object.keys(got).length) continue;
+      for (const [n, u] of Object.entries(got)) map.set(Number(n), u);
+      stillCache.set(a.id, map);
+      let here = 0;
+      for (const e of list) { const u = got[e.n]; if (u && !e.thumb) { e.thumb = u; if (page === first) here++; } }
+      if (here) draw(page ?? first); // the same page, now with pictures
+    }
   };
 
-  panel.innerHTML = `<nav class="season-pills" aria-label="Seasons" hidden></nav><div class="ep-tools"><span>${list.length} episodes · ${seen.size} watched</span>
-      ${pages > 1 ? selectHTML({ name: 'range', label: 'Episodes', any: null, align: 'right', value: String(startPage),
-        options: Array.from({ length: pages }, (_, i) => [String(i), `${i * PAGE + 1}–${Math.min(list.length, (i + 1) * PAGE)}`]) }) : ''}</div>
-    <div class="ep-grid"></div>`;
-  const sel = $('.select', panel);
-  if (sel) initSelect(sel, v => draw(Number(v)));
-  draw(startPage);
-  seasonPills(panel, a, alive);
+  await render(part);
+  // The source's list can land after the tab gave up on it: titles and
+  // pictures for the whole show, not just the entries AniList lists. When it
+  // arrives, the page is drawn again.
+  if (!part) {
+    const late = await sourceEpisodes(a).then(p => (p?.episodes?.length ? p : null)).catch(() => null);
+    if (late && alive() && panel.isConnected) await render(late);
+  }
 }
 
 /** Season 1 / Season 2 / … buttons above the episodes, when the show has more than one season. */

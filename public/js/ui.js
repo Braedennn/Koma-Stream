@@ -1,5 +1,5 @@
 // Formatting helpers and shared UI components: cards, rows, hero, dropdowns, episode index.
-import { inList, watchedSet } from './store.js';
+import { inLibrary, inList, shelfOf, SHELVES, watchedSet } from './store.js';
 import { icon } from './icons.js';
 
 export { icon };
@@ -69,16 +69,29 @@ export function errorBox(el, err, retry) {
 /* ---------- my list buttons ---------- */
 export const listBtn = id => `<button class="btn btn-ghost" type="button" data-list="${id}" aria-pressed="${inList(id)}">${listBtnInner(inList(id))}</button>`;
 const listBtnInner = on => `${icon(on ? 'check' : 'plus')}<span>${on ? 'In my list' : 'My list'}</span>`;
-const quickBtn = id => `<button class="quick" type="button" data-list="${id}" data-quick aria-pressed="${inList(id)}" aria-label="${inList(id) ? 'Remove from' : 'Add to'} My list">${icon(inList(id) ? 'check' : 'plus')}</button>`;
+// The + on a poster opens the library menu: My list, or one of the shelves.
+export const quickBtn = id => `<button class="quick" type="button" data-list="${id}" data-shelf-open="${id}" aria-pressed="${inLibrary(id)}" aria-expanded="false" aria-haspopup="menu" aria-label="${inLibrary(id) ? 'In your library' : 'Add to your library'}" title="${inLibrary(id) ? 'In your library' : 'Add to your library'}">${icon(inLibrary(id) ? 'check' : 'plus')}</button>`;
 export function syncListButton(b) {
-  const on = inList(Number(b.dataset.list));
-  b.setAttribute('aria-pressed', on);
-  if (b.hasAttribute('data-quick')) {
-    b.innerHTML = icon(on ? 'check' : 'plus');
-    b.setAttribute('aria-label', `${on ? 'Remove from' : 'Add to'} My list`);
-  } else {
-    b.innerHTML = listBtnInner(on);
+  const id = Number(b.dataset.list);
+  if (b.hasAttribute('data-shelf-open')) {
+    const inLib = inLibrary(id);
+    b.setAttribute('aria-pressed', inLib);
+    b.innerHTML = icon(inLib ? 'check' : 'plus');
+    const say = inLib ? 'In your library' : 'Add to your library';
+    b.setAttribute('aria-label', say);
+    b.title = say;
+    return;
   }
+  const on = inList(id);
+  b.setAttribute('aria-pressed', on);
+  // On a television the button opens the library menu, so it says where the
+  // show sits: on a shelf, or on My list.
+  const shelf = SHELVES.find(s => s.id === shelfOf(id));
+  if (shelf && document.documentElement.classList.contains('tv')) {
+    b.innerHTML = `${icon('bookmark')}<span>${shelf.label}</span>`;
+    return;
+  }
+  b.innerHTML = listBtnInner(on);
 }
 
 /* ---------- images ---------- */
@@ -91,7 +104,7 @@ const posterSet = a => (a.coverImage?.large && a.coverImage?.extraLarge
   ? ` srcset="${esc(a.coverImage.large)} 230w, ${esc(a.coverImage.extraLarge)} 460w" sizes="(max-width: 560px) 45vw, (max-width: 1150px) 22vw, 15vw"`
   : '');
 
-export function card(a, { progress = false, note = '', seen: seenIn = null } = {}) {
+export function card(a, { progress = false, note = '', seen: seenIn = null, dismiss = false } = {}) {
   const href = progress ? `/watch/${a.id}` : `/anime/${a.id}`;
   // `seen` lets a caller state how many episodes *this* view counts — the continue
   // watching rail knows what you watched here, which is not always everything marked.
@@ -99,7 +112,9 @@ export function card(a, { progress = false, note = '', seen: seenIn = null } = {
   const total = a.episodes || airedCount(a);
   const s = score(a);
   const line = note || (progress ? `Episode ${seen + 1} next${total ? ` of ${total}` : ''}` : meta(a.seasonYear, eps(a)));
-  return `<article class="card">
+  // The trailer id is what the hovered card plays. Most titles have one.
+  const yt = ytId(a);
+  return `<article class="card"${yt ? ` data-trailer="${esc(yt)}"` : ''}>
     <div class="poster-wrap">
       <a class="poster" href="${href}" tabindex="-1" aria-hidden="true">
         ${img(a.coverImage?.large || big(a), '', posterSet(a))}
@@ -110,6 +125,7 @@ export function card(a, { progress = false, note = '', seen: seenIn = null } = {
       </a>
       <div class="aud-row" data-audio-badge="${a.id}" aria-hidden="true"></div>
       ${quickBtn(a.id)}
+      ${dismiss ? `<button class="card-x" type="button" data-continue-remove="${a.id}" aria-label="Take ${esc(name(a))} out of Continue watching" title="Take out of Continue watching">${icon('x')}</button>` : ''}
       <div class="card-hover">${s ? `<b>${icon('star')}${s}</b>` : ''}<span>${esc(meta(studio(a), (a.genres || [])[0]))}</span></div>
     </div>
     <a class="card-title" href="${href}">${esc(name(a))}</a>
@@ -168,25 +184,35 @@ const heroMeta = a => [
 
 export function hero(list) {
   return `<section class="hero" aria-roledescription="carousel" aria-label="Spotlight">
-    ${list.map((a, i) => { const seen = watchedSet(a.id).size;
-      return `<article class="slide${i ? '' : ' on'}" aria-roledescription="slide" aria-label="${i + 1} of ${list.length}"${i ? ' aria-hidden="true" inert' : ''}>
-      <div class="slide-bg${a.bannerImage ? '' : ' cover'}"><img src="${esc(a.bannerImage || big(a))}" alt="" ${i ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async"></div>
-      <div class="slide-body">
-        <span class="spot">#${i + 1} Spotlight</span>
-        <h2>${esc(name(a))}</h2>
-        <div class="meta">${heroMeta(a)}</div>
-        <p class="syn">${esc(plain(a.description))}</p>
-        <div class="hero-actions">
-          <a class="btn btn-primary" href="/watch/${a.id}">${icon('play')}${seen ? 'Continue watching' : a.episodes === 1 || a.format === 'MOVIE' ? 'Watch now' : 'Watch Episode 1'}</a>
-          ${listBtn(a.id)}
+    <div class="hero-inner">
+      ${list.map((a, i) => { const seen = watchedSet(a.id).size;
+        return `<article class="slide${i ? '' : ' on'}" aria-roledescription="slide" aria-label="${i + 1} of ${list.length}"${i ? ' aria-hidden="true" inert' : ''}>
+        <div class="hero-backdrop${a.bannerImage ? ' has-banner' : ' has-cover'}">
+          <img src="${esc(a.bannerImage || big(a))}" alt="" ${i ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async">
         </div>
-      </div>
-    </article>`; }).join('')}
-    ${list.length > 1 ? `<div class="hero-ctrl">
-      <button class="icon-btn" type="button" data-step="-1" aria-label="Previous slide">${icon('left')}</button>
-      <div class="dots">${list.map((_, i) => `<button class="dot${i ? '' : ' on'}" type="button" aria-label="Show slide ${i + 1}"><i></i></button>`).join('')}</div>
-      <button class="icon-btn" type="button" data-step="1" aria-label="Next slide">${icon('right')}</button>
-    </div>` : ''}
+        <div class="hero-body">
+          <span class="hero-badge">${icon('spark')}Spotlight ${i + 1} of ${list.length}${icon('right')}</span>
+          <h1 class="hero-title">${esc(name(a))}</h1>
+          <div class="hero-meta">${heroMeta(a)}</div>
+          <p class="hero-sub">${esc(plain(a.description))}</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="/watch/${a.id}">${icon('play')}${seen ? 'Continue watching' : a.episodes === 1 || a.format === 'MOVIE' ? 'Watch now' : 'Watch Episode 1'}</a>
+            ${listBtn(a.id)}
+          </div>
+        </div>
+        <div class="hero-figure${a.bannerImage ? '' : ' cover'}">
+          ${a.bannerImage
+            ? `<img src="${esc(a.bannerImage)}" alt="" ${i ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async">`
+            : `<img class="blur" src="${esc(big(a))}" alt="" aria-hidden="true">
+               <img class="shot" src="${esc(big(a))}" alt="" ${i ? 'loading="lazy"' : 'fetchpriority="high"'} decoding="async">`}
+        </div>
+      </article>`; }).join('')}
+      ${list.length > 1 ? `<div class="hero-ctrl">
+        <button class="icon-btn" type="button" data-step="-1" aria-label="Previous slide">${icon('left')}</button>
+        <div class="dots">${list.map((_, i) => `<button class="dot${i ? '' : ' on'}" type="button" aria-label="Show slide ${i + 1}"><i></i></button>`).join('')}</div>
+        <button class="icon-btn" type="button" data-step="1" aria-label="Next slide">${icon('right')}</button>
+      </div>` : ''}
+    </div>
   </section>`;
 }
 
@@ -278,7 +304,29 @@ export function initSelect(el, onChange) {
     const o = visible();
     o.forEach(x => x.classList.remove('active'));
     active = Math.max(0, Math.min(o.length - 1, i));
-    if (o[active]) { o[active].classList.add('active'); if (scroll) o[active].scrollIntoView({ block: 'nearest' }); }
+    if (!o[active]) return;
+    o[active].classList.add('active');
+    if (!scroll) return;
+    // Only the menu may scroll. scrollIntoView() also scrolls every scrollable
+    // ancestor, including the page, which made a television jump to the top
+    // or bottom of Browse whenever the active option changed.
+    const mr = menu.getBoundingClientRect();
+    const r = o[active].getBoundingClientRect();
+    if (r.top < mr.top) menu.scrollTop -= mr.top - r.top;
+    else if (r.bottom > mr.bottom) menu.scrollTop += r.bottom - mr.bottom;
+  };
+  const moveActive = delta => {
+    const o = visible();
+    if (!o.length) return false;
+    const at = o.findIndex(x => x.classList.contains('active'));
+    setActive(Math.max(0, Math.min(o.length - 1, (at < 0 ? 0 : at) + delta)));
+    return true;
+  };
+  const pickActive = () => {
+    const o = visible().find(x => x.classList.contains('active')) || visible()[0];
+    if (!o) return false;
+    o.click();
+    return true;
   };
   const filter = q => {
     let n = 0;
@@ -298,6 +346,14 @@ export function initSelect(el, onChange) {
     if (menu.getBoundingClientRect().right > document.documentElement.clientWidth - 8) el.classList.add('flip');
     btn.setAttribute('aria-expanded', 'true');
     setActive(Math.max(0, visible().findIndex(x => x.getAttribute('aria-selected') === 'true')));
+    // On a television the selector keeps the focus. Moving it into the menu
+    // makes the WebView zoom or pan towards the list, while the remote only
+    // needs the highlighted option. The mouse version still focuses the menu
+    // so its filter field and keyboard navigation work as before.
+    if (document.documentElement.classList.contains('tv')) {
+      btn.focus({ preventScroll: true });
+      return;
+    }
     (find || menu).focus({ preventScroll: true });
   };
   const close = (focus = true) => {
@@ -332,6 +388,8 @@ export function initSelect(el, onChange) {
     if (notify) onChange?.(o.dataset.value);
   };
   el._close = close;
+  el._move = moveActive;
+  el._pick = pickActive;
   el.setValue = v => {
     if (multi) { el.dataset.value = String(v ?? ''); $$('.opt', menu).forEach(x => x.setAttribute('aria-selected', el.dataset.value.split(',').includes(x.dataset.value))); paintMultiBtn(); }
     else set(v, false);
@@ -342,7 +400,18 @@ export function initSelect(el, onChange) {
     if (x) { set(x.closest('.sel-chip').dataset.val, true); return; } // remove one chip without opening the menu
     el.classList.contains('open') ? close() : open();
   });
-  btn.addEventListener('keydown', e => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); open(); } });
+  // A menu that keeps its grip after the focus has left it steals the next
+  // centre-button press: selecting a rail category could quietly choose a
+  // filter instead and leave the viewer on Browse.
+  el.addEventListener('focusout', e => {
+    if (!el.contains(e.relatedTarget)) close(false);
+  });
+  // On a television the arrows move the focus and nothing else: the list
+  // opens with the middle button, the way everything else does.
+  btn.addEventListener('keydown', e => {
+    if (document.documentElement.classList.contains('tv')) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); open(); }
+  });
   menu.addEventListener('click', e => {
     const o = e.target.closest('.opt');
     if (!o) return;
@@ -395,6 +464,13 @@ export function episodeIndex(a, schedule, sourceEps = [], offset = 0) {
     if (!named.has(n)) named.set(n, { ...e, title: e.title.replace(/^Episode\s+\d+\s*[-:–]\s*/i, '') });
   });
   const stripNum = t => String(t || '').replace(/^Episode\s+\d+\s*[-:–]\s*/i, '');
+  // A title that says nothing cannot be shown: "Episode 12", or AniList's
+  // "Untitled" for the listings it carries without a name. The episode's
+  // number is the honest fallback.
+  const realTitle = t => {
+    const v = stripNum(t).trim();
+    return v && !/^episode\s*\d+$/i.test(v) && !/^untitled$/i.test(v) ? v : '';
+  };
   const src = new Map(sourceEps.filter(e => Number.isFinite(Number(e.num))).map(e => [Number(e.num), e]));
   const dates = new Map(schedule.map(s => [s.episode, s.airingAt]));
   // AniList's streamingEpisodes and the local streaming source both sometimes
@@ -415,10 +491,11 @@ export function episodeIndex(a, schedule, sourceEps = [], offset = 0) {
     // `offset` episodes in; the source's list is already this part's.
     const s = named.get(n + offset);
     const x = src.get(n);
-    const xt = x ? stripNum(x.title) : '';
-    // The source's own title wins when it says something ("Episode 12" does not).
-    const title = (xt && !/^episode\s*\d+$/i.test(xt)) ? xt
-      : (s?.title || xt || (a.format === 'MOVIE' && total === 1 ? 'Feature' : ''));
+    const xt = x ? realTitle(x.title) : '';
+    // The source's own title wins when it says something; AniList's "Untitled"
+    // says nothing, and the number is shown instead.
+    const st = s ? realTitle(s.title) : '';
+    const title = xt || st || (a.format === 'MOVIE' && total === 1 ? 'Feature' : '');
     return {
       n, title,
       thumb: x?.thumb || s?.thumbnail, url: s?.url, site: s?.site, at: dates.get(n), later: n > aired,

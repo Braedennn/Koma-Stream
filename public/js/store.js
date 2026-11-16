@@ -24,6 +24,60 @@ addEventListener('storage', e => {
 export const inList = id => state.list.includes(id);
 export const listIds = () => [...state.list];
 export const watchedSet = id => new Set(state.watched[id] || []);
+
+/* ---------- library shelves ----------
+ * Where a show sits in your library: planning to watch it, watching it,
+ * finished it, holding it, or dropped it. One shelf per show, and it is kept
+ * apart from My list (the AniList watchlist) and from the watch state, so
+ * dropping a show never throws away what you watched. Its own key again, so
+ * nothing else can shift its shape. */
+export const SHELVES = [
+  { id: 'planned', label: 'Plan to watch', icon: 'calendar' },
+  { id: 'watching', label: 'Continue watching', icon: 'play' },
+  { id: 'watched', label: 'Watched', icon: 'check' },
+  { id: 'hold', label: 'On hold', icon: 'clock' },
+  { id: 'dropped', label: 'Dropped', icon: 'x' },
+];
+const SKEY = 'koma.shelf.v1';
+
+function loadShelves() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SKEY));
+    return s && typeof s === 'object' && !Array.isArray(s)
+      ? Object.fromEntries(Object.entries(s).filter(([k, v]) => Number.isInteger(Number(k)) && SHELVES.some(x => x.id === v)))
+      : {};
+  } catch {
+    return {};
+  }
+}
+let shelves = loadShelves();
+function saveShelves(id = null) {
+  try { localStorage.setItem(SKEY, JSON.stringify(shelves)); } catch { /* private mode or full: keep in memory */ }
+  dispatchEvent(new CustomEvent('koma:shelf', { detail: { id } }));
+}
+addEventListener('storage', e => {
+  if (e.key === SKEY) { shelves = loadShelves(); dispatchEvent(new CustomEvent('koma:shelf')); }
+});
+
+/** The shelf a show sits on — '' when it sits on none. */
+export const shelfOf = id => shelves[id] || '';
+/** Every show's shelf, as { id: shelf }. A copy — callers never touch the store. */
+export const shelfMap = () => ({ ...shelves });
+/** Put a show on a shelf, or take it off every shelf when the name is empty. */
+export function setShelf(id, name) {
+  const clean = SHELVES.some(s => s.id === name) ? name : '';
+  if (clean) shelves[id] = clean; else delete shelves[id];
+  saveShelves(id);
+  return clean;
+}
+/** Everything in your library: My list, plus whatever shelf a show sits on. */
+export function libraryIds() {
+  return [...new Set([...state.list, ...Object.keys(shelves).map(Number)])];
+}
+/** Is this show in your library at all — on the list, or on a shelf? */
+export const inLibrary = id => inList(id) || Boolean(shelves[id]);
+/** Shows that are finished, dropped or planned: nothing to pick up right now. */
+export const shelvedOut = () => new Set(Object.entries(shelves).filter(([, v]) => v === 'planned' || v === 'watched' || v === 'dropped').map(([k]) => Number(k)));
 /** Every show's watched episodes, as { id: [eps] }. A copy — callers never touch the store. */
 export const watchedMap = () => Object.fromEntries(Object.entries(state.watched).map(([id, eps]) => [id, [...eps]]));
 
@@ -40,6 +94,47 @@ export const writeProgress = (id, slot) => {
   if (slot) all[id] = slot; else delete all[id];
   try { localStorage.setItem(PKEY, JSON.stringify(all)); } catch { /* full */ }
 };
+
+/* ---------- out of Continue watching ---------- *
+ * A show you took out of Continue watching: it is not offered again until you
+ * open it again. Nothing else about it changes — the resume point, the journal,
+ * the stats and the list all stay as they are. Separate key, so it never shifts
+ * the shape of the rest. */
+const CKEY = 'koma.continue.v1';
+
+function loadHidden() {
+  try {
+    const h = JSON.parse(localStorage.getItem(CKEY));
+    return h && typeof h === 'object' && !Array.isArray(h)
+      ? Object.fromEntries(Object.entries(h).filter(([k, v]) => Number.isInteger(Number(k)) && Number.isFinite(Number(v))))
+      : {};
+  } catch {
+    return {};
+  }
+}
+let hidden = loadHidden();
+function saveHidden(id = null) {
+  try { localStorage.setItem(CKEY, JSON.stringify(hidden)); } catch { /* full */ }
+  dispatchEvent(new CustomEvent('koma:continue', { detail: { id } }));
+}
+addEventListener('storage', e => {
+  if (e.key === CKEY) { hidden = loadHidden(); dispatchEvent(new CustomEvent('koma:continue')); }
+});
+
+/** The shows taken out of Continue watching. */
+export const continueHidden = () => new Set(Object.keys(hidden).map(Number));
+/** Take a show out of Continue watching. Nothing else about it changes. */
+export function hideFromContinue(id) {
+  if (hidden[id]) return;
+  hidden[id] = Date.now();
+  saveHidden(id);
+}
+/** Put it back — opening the show again is a decision to watch it. */
+export function showInContinue(id) {
+  if (!hidden[id]) return;
+  delete hidden[id];
+  saveHidden(id);
+}
 
 export function toggleList(id) {
   state.list = inList(id) ? state.list.filter(x => x !== id) : [id, ...state.list];
