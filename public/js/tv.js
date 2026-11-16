@@ -607,6 +607,24 @@ function selectMove(dir) {
     s._close?.(false);
     return false;
   }
+  const find = s.querySelector('.select-find input');
+  // The filter box at the top of the drop-down is a text field: while it has
+  // the focus the arrows belong to it - down goes back to the list, and up
+  // and the sideways keys do nothing. The box is the top of the drop-down,
+  // and walking out of a menu the viewer is typing in helps no one.
+  if (find && document.activeElement === find) {
+    if (dir === 'down') s.querySelector('.select-btn')?.focus({ preventScroll: true });
+    return true;
+  }
+  // Up from the first option reaches the filter box. This is the only way
+  // into it with a remote, and the system keyboard follows the focus there.
+  if (find && dir === 'up') {
+    const first = [...s.querySelectorAll('.opt:not([hidden])')][0];
+    if (first && first.classList.contains('active')) {
+      find.focus({ preventScroll: true });
+      return true;
+    }
+  }
   // The list is open: it has the focus, so the page must not move under it.
   if (dir === 'left' || dir === 'right') return true;
   if (s._move) return s._move(dir === 'down' ? 1 : -1);
@@ -1449,6 +1467,12 @@ export function initTv() {
 
   // The television's own navigation and its own search screen.
   prepareSettingsToggles();
+  // The filter box inside a drop-down is a text field on a television too:
+  // the system keyboard comes up with the focus and goes away with it. A
+  // television has no other way to type.
+  const keyboard = on => { try { window.KomaAndroid?.setTextEntry?.(!!on); } catch { /* no shell */ } };
+  document.addEventListener('focusin', e => { if (e.target?.closest?.('.select.open .select-find input')) keyboard(true); }, true);
+  document.addEventListener('focusout', e => { if (e.target?.closest?.('.select-find input')) keyboard(false); }, true);
   buildRail();
   searchDlg = buildSearch();
   // The list buttons say where a show sits, from the first frame.
