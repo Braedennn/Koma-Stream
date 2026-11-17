@@ -48,6 +48,7 @@ public class MainActivity extends Activity {
 
   private WebView webView;
   private FrameLayout rootLayout;
+  private VideoChromeClient videoChromeClient;
   private UpdateManager updateManager;
   private UpdatePrompt updatePrompt;
   private View customView;
@@ -180,9 +181,10 @@ public class MainActivity extends Activity {
     s.setSupportZoom(false);
     s.setBuiltInZoomControls(false);
     s.setDisplayZoomControls(false);
-    webView.setWebChromeClient(new VideoChromeClient());
+    videoChromeClient = new VideoChromeClient();
+    webView.setWebChromeClient(videoChromeClient);
     // The page reads the app's version through this - the footer then says
-    // "Koma 1.7.16 - Up to date" instead of presenting the app as a web page.
+    // "Koma 1.7.17 - Up to date" instead of presenting the app as a web page.
     webView.addJavascriptInterface(new KomaBridge(), "KomaAndroid");
     trace(this, "webview ready");
 
@@ -597,7 +599,7 @@ public class MainActivity extends Activity {
     // whether it wants the back button - an open drawer or panel takes it -
     // and only then does the app go back.
     if (customView != null) {
-      ((VideoChromeClient) webView.getWebChromeClient()).onHideCustomView();
+      videoChromeClient.onHideCustomView();
       return;
     }
     webView.evaluateJavascript(
