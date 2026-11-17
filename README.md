@@ -1,6 +1,6 @@
 # Koma Stream
 
-A dark, modern anime streaming app for Windows — a full catalog with tracking on one side, a custom-built video player with sub/dub on the other, and the streaming servers it needs **bundled inside the app itself**. One installer, no system dependencies, no console windows. Open the app and everything is just running.
+A dark, modern anime streaming app for Windows, Android phones and Android TVs — a full catalog with tracking on one side, a custom-built video player with sub/dub on the other, and the streaming servers it needs **bundled inside the app itself**. One installer per platform, no runtime dependencies, no console windows. Open the app and everything is just running.
 
 | Home | Watching |
 | --- | --- |
@@ -54,6 +54,7 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 - **Backups** — Settings → Data can export your watch progress, preferences and lists to a file, and restore them anywhere — handy across reinstalls
 - **Discord Rich Presence** — what you're watching shows on your own Discord profile out of the box: the show's cover art, a play/pause badge, a timing bar that follows your exact position in the episode (seek and it jumps with you, like Spotify), and a button to the Koma download site; your current page shows while you're browsing
 - **Updates that ask first** — the app downloads a new release's installer in the background and asks "Update now?" before anything runs; release notes open in-app, and a put-off installer is kept for next launch — plus it sweeps away old update downloads from AppData
+- **Native Android phone and TV apps** — the same Koma site and player, packaged separately for phones and televisions. They find the latest GitHub release automatically, download the APK for their own device, verify its SHA-256 checksum, package, version and signing certificate, and still wait for your confirmation before Android's installer opens
 - **A version line that tells the truth** — the bottom of the footer always shows the build you are on and whether it is the latest one; if a new release is out, a button there brings the update card straight back
 - **Updates that never crash** — clicking "Update now" closes Koma the instant the installer opens (servers, window and all), and the installer waits until the old app is really gone before it copies a single file
 - All servers bind to 127.0.0.1 only — nothing is exposed to your network, no firewall prompts
@@ -62,11 +63,15 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 
 ## Install
 
-1. Download **`Koma-Setup.exe`** — from the release assets below or [totallynoire.xyz/koma](https://www.totallynoire.xyz/koma)
-2. Run it — per-user install, no admin prompt, desktop + Start menu shortcuts, clean uninstaller
-3. Koma opens, boots its servers in the background, and drops you into the site
+Download the package for your device from the [latest release](../../releases/latest):
 
-Requires Windows 10/11 x64. Installed size ~475 MB.
+- **Windows:** `Koma-Setup.exe` — run it, and Koma opens with its servers already running.
+- **Android phone:** `Koma-1.7.17-phone.apk` — open it and allow installs from that source once.
+- **Android TV:** `Koma-1.7.17-tv.apk` — open it with a file manager and allow installs from that source once.
+
+The Android apps update themselves from the same GitHub release. They download the correct APK in the background, verify it, and still wait for your confirmation before Android's installer opens.
+
+The desktop app requires Windows 10/11 x64. Installed size ~475 MB.
 
 ## Notes
 
