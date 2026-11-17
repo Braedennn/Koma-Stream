@@ -29,8 +29,28 @@ if (window.KomaAndroid) {
   // furniture on `html.android` (the footer, and the player's volume slider,
   // which the device's own volume control replaces).
   document.documentElement.classList.add('android');
-  const v = String(window.KomaAndroid.version() || 'dev');
-  window.koma = { version: () => Promise.resolve({ current: v, latest: v, outdated: false }) };
+  const shell = window.KomaAndroid;
+  const v = String(shell.version() || 'dev');
+  const status = () => {
+    try {
+      const raw = shell.updateStatus?.();
+      const info = raw ? JSON.parse(raw) : null;
+      if (info?.current) return info;
+    } catch (e) { /* fall back to the installed version */ }
+    return { current: v, latest: v, outdated: false, state: 'idle', checking: false };
+  };
+  window.koma = {
+    version: () => Promise.resolve(status()),
+    update: {
+      check: () => {
+        shell.updateCheck?.();
+        shell.updateShow?.();
+        return Promise.resolve(true);
+      },
+      apply: () => { shell.updateShow?.(); return Promise.resolve(true); },
+      cancel: () => { shell.updateCancel?.(); return Promise.resolve(true); },
+    },
+  };
   const fine = document.querySelector('.fine');
   if (fine) fine.textContent = fine.textContent.replace('in this browser', 'on this device');
 }
@@ -205,9 +225,14 @@ if (menuBtn && menuDlg) {
 /* The shell asks before it leaves the page: whatever is open takes the back
    button first - the drawer, a panel, a question. */
 window.__komaBack = () => {
+  // The television has one back path for every panel, including the open
+  // drop-downs and the history behind the page.
+  if (tv && window.__komaTv?.back?.()) return true;
   if (menuDlg?.open) { closeMenu(); return true; }
   const open = [...document.querySelectorAll('dialog[open]')].pop();
   if (open) { open.close('cancel'); return true; }
+  const select = document.querySelector('.select.open');
+  if (select) { select._close?.(true); return true; }
   return false;
 };
 

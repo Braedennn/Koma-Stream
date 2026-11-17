@@ -8,8 +8,8 @@ two loopback ports instead of two processes.
 
 Verified end to end on LDPlayer 9 (Android 14, x86_64): app opens, Node boots
 both servers, the site renders, the API answers. Not yet verified on device:
-playback (the user's next test), dub badges (Python not ported), watch-together
-host, the updater.
+playback (the user's next test), dub badges (Python not ported), or the
+watch-together host.
 
 ## The five crashes between "closes instantly" and "works", in the order they fell
 
@@ -44,22 +44,51 @@ tag `nodejs`), the app's own trail (`files/koma-log.txt`, via
 The install-and-launch dance used for testing:
 ```
 adb connect 127.0.0.1:5555        # LDPlayer with ADB debugging enabled
-adb install -r -g Koma-1.7.16-debug.apk
+adb install -r -g Koma-1.7.17-phone.apk
 adb shell am force-stop app.koma.stream; adb shell input keyevent KEYCODE_HOME
 adb shell input tap 800 228       # the home-screen icon
 adb forward tcp:14180 tcp:<port> # use the port in files/koma-site.port
 ```
 
-## Install the test build
+## Install a build
 
-`Koma-1.7.16-debug.apk` sits next to this file. Copy it to the phone (or drag
-it onto the LDPlayer window) and open it; Android asks to allow installs from
-that source once. The APK is signed with a debug key, so it installs anywhere.
+`Koma-1.7.17-phone.apk` and `Koma-1.7.17-tv.apk` are the public release
+packages. Copy the phone package to a phone and the TV package to a television.
+Android asks to allow installs from that source once. The release packages use
+the project's permanent signing key; the debug variants are only for local
+testing.
 
 On first launch the app copies the Node project out of the APK (a few seconds),
 starts the servers, then opens the site. From there it is the same Koma: browse,
 search, play. Progress, library and preferences live in the WebView's storage and
 survive updates, not uninstalls — Settings -> Data backup is the migration path.
+
+## Updates from GitHub Releases
+
+Both Android flavors look at the latest published release in
+`Braedennn/Koma-Stream`. The phone build looks for a phone APK and the TV build
+looks for a TV APK, so an update can never install the wrong app or package.
+The APK is downloaded in the background, checked against GitHub's SHA-256
+digest, and kept in private app storage.
+
+When it is ready, each app shows its own confirmation screen: a compact panel
+on the phone and a large remote-friendly panel on the television. **Update now**
+opens Android's package installer, which asks for the final user confirmation;
+**Later** keeps the downloaded APK and offers it again later. Android's
+`REQUEST_INSTALL_PACKAGES` permission is required for this system installer
+step.
+
+Every GitHub release used by the Android apps must contain the desktop
+installer plus both Android packages, for example:
+
+```text
+Koma-Setup.exe
+Koma-1.7.17-phone.apk
+Koma-1.7.17-tv.apk
+```
+
+The stable names `Koma-phone.apk` and `Koma-tv.apk` are accepted too. A release
+without the APK for the running flavor is ignored by that flavor.
 
 ## What is known-missing in this build
 
@@ -67,7 +96,6 @@ survive updates, not uninstalls — Settings -> Data backup is the migration pat
   port; badge lookups stay "pending" and the row stays empty. Playback does not
   depend on it. The fix is porting the catalogue scan into AniVault (Phase 4).
 - **Watch-together host**: the viewer side works; hosting on the phone is deferred.
-- **Updater**: not wired yet — new APKs install over the old one by hand.
 - A first-play on a show nobody has opened yet can take longer than desktop (the
   mapping search), same as a cold desktop install.
 
@@ -84,11 +112,19 @@ survive updates, not uninstalls — Settings -> Data backup is the migration pat
    $env:JAVA_HOME   = "E:\WebsiteAnime\.data\android\jdk-21.0.13+9"
    $env:ANDROID_HOME = "E:\WebsiteAnime\.data\android\sdk"
    $env:GRADLE_USER_HOME = "E:\WebsiteAnime\.data\android\gradle-home"
-   & "E:\WebsiteAnime\.data\android\gradle-8.7\bin\gradle.bat" assembleDebug
+   & "E:\WebsiteAnime\.data\android\gradle-8.7\bin\gradle.bat" assemblePhoneRelease assembleTvRelease
    ```
-   -> `app/build/outputs/apk/debug/app-debug.apk` — then COPY it to
-   `Koma-1.7.16-debug.apk` before installing (the stale-copy trap: verifying one
-   file and installing another costs an hour).
+   -> `app/build/outputs/apk/phone/release/app-phone-release.apk` and
+   `app/build/outputs/apk/tv/release/app-tv-release.apk` — then COPY them to
+   `Koma-1.7.17-phone.apk` and `Koma-1.7.17-tv.apk` before installing or
+   publishing (the stale-copy trap: verifying one file and installing another
+   costs an hour).
+
+   Release signing reads `.data/android/release-signing.properties`; that file
+   and `koma-release.keystore` are deliberately outside Git. Back both up
+   somewhere safe: changing the certificate later means Android cannot install
+   an update over an existing installation. The version code is `10717` for
+   1.7.17 and must rise for every later release.
 
 Toolchain (all portable, all under `.data\android\`): JDK 21, cmdline-tools,
 platform-tools, platforms;android-34, build-tools;34.0.0, NDK r26b, CMake 3.22.1,

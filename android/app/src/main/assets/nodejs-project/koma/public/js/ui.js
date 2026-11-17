@@ -372,12 +372,13 @@ export function initSelect(el, onChange) {
   const set = (v, notify) => {
     if (multi) {
       const list = el.dataset.value ? el.dataset.value.split(',').filter(Boolean) : [];
-      const at = list.indexOf(String(v));
-      at >= 0 ? list.splice(at, 1) : list.push(String(v));
+      const value = String(v);
+      const added = !list.includes(value);
+      if (added) list.push(value);
       el.dataset.value = list.join(',');
       $$('.opt', menu).forEach(x => x.setAttribute('aria-selected', list.includes(x.dataset.value)));
       paintMultiBtn();
-      if (notify) onChange?.(el.dataset.value);
+      if (notify && added) onChange?.(el.dataset.value);
       return;
     }
     const o = $$('.opt', menu).find(x => x.dataset.value === String(v)) || $('.opt', menu);
@@ -386,6 +387,17 @@ export function initSelect(el, onChange) {
     $('.val', el).textContent = o.textContent.trim();
     el.classList.toggle('set', o.dataset.value !== '' && $('.opt', menu).dataset.value === '');
     if (notify) onChange?.(o.dataset.value);
+  };
+  const remove = (v, notify) => {
+    if (!multi) return;
+    const list = el.dataset.value ? el.dataset.value.split(',').filter(Boolean) : [];
+    const at = list.indexOf(String(v));
+    if (at < 0) return;
+    list.splice(at, 1);
+    el.dataset.value = list.join(',');
+    $$('.opt', menu).forEach(x => x.setAttribute('aria-selected', list.includes(x.dataset.value)));
+    paintMultiBtn();
+    if (notify) onChange?.(el.dataset.value);
   };
   el._close = close;
   el._move = moveActive;
@@ -397,7 +409,7 @@ export function initSelect(el, onChange) {
 
   btn.addEventListener('click', e => {
     const x = e.target.closest('.sel-chip i');
-    if (x) { set(x.closest('.sel-chip').dataset.val, true); return; } // remove one chip without opening the menu
+    if (x) { remove(x.closest('.sel-chip').dataset.val, true); return; } // remove one chip without opening the menu
     el.classList.contains('open') ? close() : open();
   });
   // A menu that keeps its grip after the focus has left it steals the next

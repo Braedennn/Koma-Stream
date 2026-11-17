@@ -1306,6 +1306,112 @@ html.dlg-open, html.dlg-open body { overflow: hidden; }
 .season-item.here .card-meta { color: var(--accent); }
 
 /* ---------- responsive ---------- */
+/* The desktop app gets the full billboard treatment: the artwork is the
+   backdrop, the words sit on its left and the banner keeps its own stage on
+   the right. The phone keeps the centred stack below, where a full-bleed
+   picture would swallow the whole screen. */
+@media (min-width: 861px) {
+  html.in-app:not(.android) .hero {
+    position: relative;
+    height: min(68vh, 720px);
+    min-height: 520px;
+    padding: 0;
+    overflow: hidden;
+    isolation: isolate;
+  }
+  html.in-app:not(.android) .hero-inner {
+    position: relative;
+    max-width: none;
+    height: 100%;
+    margin: 0;
+  }
+  html.in-app:not(.android) .hero-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    background: var(--bg-1);
+  }
+  html.in-app:not(.android) .hero-backdrop img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 22%;
+  }
+  html.in-app:not(.android) .hero-backdrop.has-banner img { filter: brightness(.48) saturate(1.1); }
+  html.in-app:not(.android) .hero-backdrop.has-cover img { filter: blur(42px) brightness(.42) saturate(1.15); transform: scale(1.18); }
+  html.in-app:not(.android) .hero-backdrop::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, rgba(0, 0, 0, .95) 0%, rgba(0, 0, 0, .82) 34%, rgba(0, 0, 0, .3) 68%, rgba(0, 0, 0, .62) 100%),
+      linear-gradient(0deg, #000 1%, transparent 46%);
+  }
+  html.in-app:not(.android) .slide.on {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(420px, 31vw, 620px);
+    justify-items: stretch;
+    align-items: center;
+    gap: clamp(32px, 4vw, 80px);
+    min-height: 100%;
+    padding: clamp(36px, 4vw, 68px) var(--gut) clamp(56px, 5vw, 84px);
+    text-align: left;
+  }
+  html.in-app:not(.android) .hero-body {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    max-width: 640px;
+    text-align: left;
+  }
+  html.in-app:not(.android) .hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 28px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+  html.in-app:not(.android) .hero-badge .i { width: 14px; height: 14px; }
+  html.in-app:not(.android) .hero-title {
+    margin: 0;
+    max-width: 16ch;
+    font-size: clamp(38px, 4.6vw, 76px);
+    text-align: left;
+  }
+  html.in-app:not(.android) .hero-meta { justify-content: flex-start; margin-top: 12px; }
+  html.in-app:not(.android) .hero-sub {
+    max-width: 58ch;
+    margin: 16px 0 0;
+    font-size: 15px;
+    text-align: left;
+  }
+  html.in-app:not(.android) .hero-actions { justify-content: flex-start; }
+  html.in-app:not(.android) .hero-figure {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    justify-self: end;
+  }
+  html.in-app:not(.android) .hero-figure.cover {
+    width: clamp(210px, 17vw, 300px);
+    aspect-ratio: 2 / 3;
+  }
+  html.in-app:not(.android) .hero-ctrl {
+    position: absolute;
+    right: var(--gut);
+    bottom: clamp(18px, 2vw, 30px);
+    z-index: 3;
+    margin-top: 0;
+  }
+  html.in-app:not(.android) .hero-ctrl .icon-btn { width: 42px; height: 42px; }
+  html.in-app:not(.android) .hero-ctrl .icon-btn .i { width: 20px; height: 20px; }
+}
 @media (max-width: 1400px) { .rail { --cols: 6; } .rail.wide { --cols: 4.5; } }
 @media (max-width: 1150px) {
   .rail { --cols: 5; } .rail.wide { --cols: 3.6; }

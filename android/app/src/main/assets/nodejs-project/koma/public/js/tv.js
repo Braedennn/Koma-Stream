@@ -85,6 +85,7 @@ const visible = el => {
   if (!el || el.hidden) return false;
   if (el.closest('[hidden]')) return false;
   if (el.closest('.view-out')) return false;
+  if (el.classList.contains('skip')) return false;
   const r = el.getBoundingClientRect();
   return r.width > 0 && r.height > 0;
 };
@@ -597,6 +598,13 @@ function move(dir) {
    open the arrows walk through the options. */
 const openSelect = () => document.querySelector('.select.open');
 const selectHasFocus = s => !!s?.contains(document.activeElement);
+
+/* Where the pad last put the focus into a filter box. Asking the shell for
+   the keyboard can shake the page's focus loose - the WebView hands it to
+   the first thing it can focus, which is the skip link at the top of the
+   body - and this is the memory the repair needs to put the focus back. */
+let findEntry = null;      // { s, at, repaired }
+let skipKeyboardUntil = 0; // the repair pass does not re-ask for the keyboard
 
 function selectMove(dir) {
   const s = openSelect();
@@ -1471,8 +1479,39 @@ export function initTv() {
   // the system keyboard comes up with the focus and goes away with it. A
   // television has no other way to type.
   const keyboard = on => { try { window.KomaAndroid?.setTextEntry?.(!!on); } catch { /* no shell */ } };
-  document.addEventListener('focusin', e => { if (e.target?.closest?.('.select.open .select-find input')) keyboard(true); }, true);
-  document.addEventListener('focusout', e => { if (e.target?.closest?.('.select-find input')) keyboard(false); }, true);
+  document.addEventListener('focusin', e => {
+    const input = e.target?.closest?.('.select.open .select-find input');
+    if (!input) return;
+    if (performance.now() < skipKeyboardUntil) return;  // the repair pass: not again
+    const s = input.closest('.select');
+    if (s) findEntry = { s, at: performance.now(), repaired: false };
+    keyboard(true);
+  }, true);
+  // The keyboard can take the focus with it. Give the filter box a moment to
+  // take it back before deciding that the viewer has really left the field.
+  document.addEventListener('focusout', e => {
+    if (!e.target?.closest?.('.select-find input')) return;
+    setTimeout(() => {
+      if (!document.activeElement?.closest?.('.select.open .select-find input')) keyboard(false);
+    }, 250);
+  }, true);
+  // Asking the shell for the keyboard can make the WebView drop the page's
+  // focus and give it back to the first thing it can find - the skip link at
+  // the top of the body, which no one can see. The filter box takes the focus
+  // back once; the shell is not asked a second time for the same entry,
+  // because it is the ask that shakes the focus loose.
+  document.addEventListener('focusin', e => {
+    if (!e.target?.classList?.contains('skip')) return;
+    const entry = findEntry;
+    if (!entry || entry.repaired || performance.now() - entry.at > 2000) return;
+    const s = entry.s;
+    const input = s?.isConnected ? s.querySelector('.select-find input') : null;
+    if (!input) return;
+    entry.repaired = true;
+    skipKeyboardUntil = performance.now() + 1200;
+    if (!s.classList.contains('open')) s.querySelector('.select-btn')?.click();
+    requestAnimationFrame(() => input.focus({ preventScroll: true }));
+  }, true);
   buildRail();
   searchDlg = buildSearch();
   // The list buttons say where a show sits, from the first frame.

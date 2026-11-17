@@ -1,6 +1,6 @@
 # Koma Stream
 
-A dark, modern anime streaming app for Windows — a full catalog with tracking on one side, a custom-built video player with sub/dub on the other, and the streaming servers it needs **bundled inside the app itself**. One installer, no system dependencies, no console windows. Ever open the app and everything is just running.
+A dark, modern anime streaming app for Windows, Android phones and Android TVs — a full catalog with tracking on one side, a custom-built video player with sub/dub on the other, and the streaming servers it needs **bundled inside the app itself**. One installer per platform, no runtime dependencies, no console windows. Ever open the app and everything is just running.
 
 | Home | |
 | --- | --- |
@@ -31,11 +31,15 @@ A dark, modern anime streaming app for Windows — a full catalog with tracking 
 
 ## Install
 
-1. Download **`Koma-Setup.exe`** from the [latest release](../../releases/latest)
-2. Run it — that's the whole process
-3. Koma opens, boots its servers in the background, and drops you into the site
+Download the package for your device from the [latest release](../../releases/latest):
 
-Requires Windows 10/11 x64. Nothing else — no Node, no Python, no npm.
+- **Windows:** `Koma-Setup.exe` — run it, and Koma opens with its servers already running.
+- **Android phone:** `Koma-1.7.17-phone.apk` — open it and allow installs from that source once.
+- **Android TV:** `Koma-1.7.17-tv.apk` — open it with a file manager and allow installs from that source once.
+
+The Android apps update themselves from the same GitHub release. They download the correct APK in the background, verify it, and still wait for your confirmation before Android's installer opens.
+
+The desktop app requires Windows 10/11 x64. Nothing else — no Node, no Python, no npm.
 
 Logs, if you ever need them, live in `%APPDATA%\Koma\logs`.
 
@@ -50,6 +54,8 @@ build-app.bat
 Requirements for building: Node.js 20+ (first run also downloads a portable Python and compiles the streaming server automatically). The finished app lands in `desktop\dist\Koma-win32-x64`.
 
 To produce the installer instead, install [NSIS](https://nsis.sourceforge.io) once and run `desktop\build-installer.bat` — it packs the app into `desktop\dist\Koma-Setup.exe`.
+
+The Android phone and TV apps are built from the same site and server code. Their toolchain, signing setup and build commands are in [`android/README.md`](android/README.md).
 
 ## How it works
 
@@ -67,6 +73,7 @@ The window is the site's own UI with a frameless title bar. Clicking play resolv
 | Path | What it is |
 | --- | --- |
 | `desktop/` | Electron app: `main.js` (server orchestration), `build.mjs` (one-command bundler), installer script |
+| `android/` | Native Android phone and TV apps, including the in-app release updater and signing setup |
 | `server.js`, `server/`, `public/` | The Koma site — zero-dependency Node server, API, and frontend |
 | `Servers - DONT TOUCH/anivault-scraper` | Vendored streaming API with local patches (below) |
 | `Servers - DONT TOUCH/allanime-api` | Vendored catalog API (FastAPI) with a null-safety fix |

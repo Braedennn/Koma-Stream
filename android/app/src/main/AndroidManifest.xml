@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Android's own package installer asks the viewer for the final confirmation. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- The app serves itself from 127.0.0.1 over HTTP; nothing else is reached in the clear. -->
     <application
@@ -30,5 +32,13 @@
                 <data android:scheme="https" android:host="anilist.co" />
             </intent-filter>
         </activity>
+
+        <!-- The verified APK is private to the app; only Android's package
+             installer receives a one-file read grant for it. -->
+        <provider
+            android:name=".ApkFileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

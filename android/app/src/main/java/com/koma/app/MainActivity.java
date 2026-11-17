@@ -48,6 +48,8 @@ public class MainActivity extends Activity {
 
   private WebView webView;
   private FrameLayout rootLayout;
+  private UpdateManager updateManager;
+  private UpdatePrompt updatePrompt;
   private View customView;
   private WebChromeClient.CustomViewCallback customViewCallback;
 
@@ -100,7 +102,7 @@ public class MainActivity extends Activity {
       traceThrowable(this, "uncaught exception on " + t.getName(), e);
       if (prior != null) prior.uncaughtException(t, e);
     });
-    trace(this, "app opening, build 1.7.16.3");
+    trace(this, "app opening, build " + BuildConfig.VERSION_NAME);
 
     // Edge to edge: the app draws under the system bars, so there are no
     // black bands at the notch or above the gesture pill - the page's own
@@ -134,6 +136,28 @@ public class MainActivity extends Activity {
     rootLayout.addView(webView, new FrameLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     setContentView(rootLayout);
+
+    String updateApi = BuildConfig.DEBUG
+        ? getIntent().getStringExtra("update_api_url") : null;
+    updateManager = new UpdateManager(this, updateApi);
+    updatePrompt = new UpdatePrompt(this, new UpdatePrompt.Callbacks() {
+      @Override
+      public void onUpdateNow(File apk, String version) {
+        installUpdate(apk, version);
+      }
+
+      @Override
+      public void onLater() {
+        updateManager.defer();
+      }
+
+      @Override
+      public void onRetry() {
+        updateManager.retry();
+      }
+    });
+    updateManager.setListener(state -> runOnUiThread(() -> onUpdateState(state)));
+    updateManager.check(false);
 
     // A television has no status bar and no navigation bar: the picture is
     // the page, and every row the bars take is a row the video does not get.
@@ -263,6 +287,30 @@ public class MainActivity extends Activity {
     }
   }
 
+  /** Shows or refreshes the native update confirmation when there is one to show. */
+  private void onUpdateState(UpdateManager.State state) {
+    if (updatePrompt == null) return;
+    if (updatePrompt.isShowing()) {
+      updatePrompt.show(state);
+      return;
+    }
+    if (!state.actionable()) return;
+    if (!updateManager.shouldShowPrompt()) return;
+    updatePrompt.show(state);
+  }
+
+  /** Validates once more, then hands the APK to Android's own installer. */
+  private void installUpdate(File apk, String version) {
+    UpdateInstaller.Result result = UpdateInstaller.install(this, apk, version);
+    if (result.needsInstallPermission) {
+      updatePrompt.setPermissionMessage(result.error);
+    } else if (!result.error.isEmpty()) {
+      updatePrompt.setInstallError(result.error);
+    } else {
+      updatePrompt.dismissAfterInstall();
+    }
+  }
+
   /** The version, read by the page: the footer reports the app, not "web". */
   private class KomaBridge {
     @JavascriptInterface
@@ -272,6 +320,40 @@ public class MainActivity extends Activity {
       } catch (Exception e) {
         return "";
       }
+    }
+
+    /** The installed version and the native updater's current state. */
+    @JavascriptInterface
+    public String updateStatus() {
+      try {
+        return updateManager.statusJson().toString();
+      } catch (Exception e) {
+        return "{\"current\":\"\",\"latest\":\"\",\"outdated\":false,\"state\":\"idle\"}";
+      }
+    }
+
+    /** Ask GitHub for a new release now, even when the periodic check is quiet. */
+    @JavascriptInterface
+    public boolean updateCheck() {
+      if (updateManager == null) return false;
+      updateManager.check(true);
+      return true;
+    }
+
+    /** Bring back a downloaded update after the viewer chose Later. */
+    @JavascriptInterface
+    public boolean updateShow() {
+      if (updateManager == null) return false;
+      updateManager.requestPrompt();
+      return true;
+    }
+
+    /** Dismiss the native update card without installing anything. */
+    @JavascriptInterface
+    public boolean updateCancel() {
+      if (updateManager != null) updateManager.defer();
+      if (updatePrompt != null) updatePrompt.dismissAsLater();
+      return true;
     }
 
     /** Is this the television build? The page asks before it draws. */
@@ -506,6 +588,11 @@ public class MainActivity extends Activity {
 
   @Override
   public void onBackPressed() {
+    if (updatePrompt != null && updatePrompt.isShowing()) {
+      updateManager.defer();
+      updatePrompt.dismissAsLater();
+      return;
+    }
     // Fullscreen video first, then the page's own panels: the page is asked
     // whether it wants the back button - an open drawer or panel takes it -
     // and only then does the app go back.
@@ -532,11 +619,13 @@ public class MainActivity extends Activity {
   protected void onResume() {
     super.onResume();
     webView.onResume();
+    if (updateManager != null) updateManager.check(false);
   }
 
   @Override
   protected void onDestroy() {
     // The Node servers keep running with the app process; the WebView goes.
+    if (updateManager != null) updateManager.shutdown();
     if (roomMulticastLock != null && roomMulticastLock.isHeld()) {
       try { roomMulticastLock.release(); } catch (Exception ignored) { }
       roomMulticastLock = null;

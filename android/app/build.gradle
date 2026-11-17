@@ -2,6 +2,22 @@ plugins {
     id 'com.android.application'
 }
 
+// The release certificate and its passwords live outside Git. The keystore
+// path may be overridden for another machine, but the key itself must remain
+// the same forever or Android will refuse in-place updates.
+def releaseSigningFile = rootProject.file('../.data/android/release-signing.properties')
+def releaseSigning = new Properties()
+if (releaseSigningFile.exists()) {
+    releaseSigningFile.withInputStream { releaseSigning.load(it) }
+}
+def hasReleaseSigning = releaseSigning.getProperty('storeFile') && releaseSigning.getProperty('storePassword') &&
+        releaseSigning.getProperty('keyAlias') && releaseSigning.getProperty('keyPassword')
+
+// Gradle properties make local test builds possible without editing this file:
+// -PkomaVersionName=1.7.16 -PkomaVersionCode=101
+def appVersionName = providers.gradleProperty('komaVersionName').orElse('1.7.17').get()
+def appVersionCode = providers.gradleProperty('komaVersionCode').map { it.toInteger() }.orElse(10717).get()
+
 android {
     namespace 'com.koma.app'
     compileSdk 34
@@ -11,8 +27,8 @@ android {
         applicationId 'app.koma.stream'
         minSdk 24          // libnode is built against 24
         targetSdk 34
-        versionCode 1
-        versionName '1.7.16'
+        versionCode appVersionCode
+        versionName appVersionName
         ndk { abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64' }
         externalNativeBuild {
             cmake {
@@ -64,10 +80,20 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile rootProject.file(releaseSigning.getProperty('storeFile'))
+                storePassword releaseSigning.getProperty('storePassword')
+                keyAlias releaseSigning.getProperty('keyAlias')
+                keyPassword releaseSigning.getProperty('keyPassword')
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // A test build: signed with the debug key so it installs anywhere.
-            signingConfig signingConfigs.debug
+            if (hasReleaseSigning) signingConfig signingConfigs.release
             minifyEnabled false
         }
     }

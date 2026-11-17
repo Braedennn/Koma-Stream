@@ -37,10 +37,9 @@ export function initVersion() {
   // In the app: the running version and its verdict on being outdated.
   if (window.koma?.version) {
     say('Checking for updates…', 'checking');
-    let latest = null;
-    window.koma.version().then(info => {
-      if (!info) return;
-      latest = info.latest || null;
+    const applyInfo = info => {
+      if (!info) return null;
+      const latest = info.latest || null;
       setVer(info.current || '—');
       if (latest && info.outdated) {
         say(`Update available — ${latest}`, 'outdated');
@@ -52,15 +51,26 @@ export function initVersion() {
         say("Couldn't check for updates", 'unknown');
         btn.hidden = true;
       }
-    }).catch(() => say("Couldn't check for updates", 'unknown'));
+      return info;
+    };
+    window.koma.version().then(applyInfo)
+      .catch(() => say("Couldn't check for updates", 'unknown'));
 
-    // "Get the update" brings the update card back, even if it was dismissed.
+    // "Get the update" asks the shell to check again. The native Android
+    // updater checks in the background, so wait briefly for its verdict; the
+    // desktop shell reports the finished result straight away.
     btn.addEventListener('click', async () => {
       btn.disabled = true;
       say('Checking…', 'checking');
       try {
         await window.koma.update?.check?.();
-        say(latest ? `Update available — ${latest}` : "Couldn't check for updates", latest ? 'outdated' : 'unknown');
+        let info = null;
+        for (let i = 0; i < 20; i++) {
+          info = await window.koma.version();
+          if (!info?.checking) break;
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        applyInfo(info);
       } catch {
         say("Couldn't check for updates", 'unknown');
       }
