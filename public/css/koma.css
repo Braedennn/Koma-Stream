@@ -307,6 +307,79 @@ body.bar-dragging { user-select: none; cursor: grabbing; }
 .hero.paused .dot.on i { animation-play-state: paused; }
 @keyframes fill { to { width: 100%; } }
 
+
+/* ---------- Android phone Spotlight ----------
+   The phone uses the compact native composition: badge, title, facts and
+   actions on the left, with a small artwork panel on the right. Every rule
+   is scoped so the restored desktop and television Spotlights stay intact. */
+html.android:not(.tv) .hero { padding: calc(var(--head-h) + 10px) var(--gut) 0; }
+html.android:not(.tv) .slide.on {
+  grid-template-columns: minmax(0, 1fr) auto;
+  justify-items: stretch;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+html.android:not(.tv) .hero-body { width: auto; max-width: none; min-width: 0; }
+html.android:not(.tv) .hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(248, 248, 248, .06);
+  border: 1px solid var(--line-2);
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 600;
+  overflow: hidden;
+}
+html.android:not(.tv) .hero-badge .i { width: 11px; height: 11px; }
+html.android:not(.tv) .hero-title {
+  margin: 6px 0 0;
+  max-width: 28ch;
+  font-size: clamp(18px, 5.1vw, 24px);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -.03em;
+  text-wrap: balance;
+  color: var(--text);
+}
+html.android:not(.tv) .hero-meta {
+  justify-content: flex-start;
+  gap: 3px 8px;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 500;
+}
+html.android:not(.tv) .hero-meta > span + span::before { margin-right: 6px; }
+html.android:not(.tv) .hero-meta .i { width: 11px; height: 11px; }
+html.android:not(.tv) .hero-sub { display: none; }
+html.android:not(.tv) .hero-actions {
+  justify-content: flex-start;
+  gap: 4px;
+  margin-top: 9px;
+}
+html.android:not(.tv) .hero-actions .btn {
+  height: 30px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  gap: 4px;
+}
+html.android:not(.tv) .hero-actions .btn .i { width: 14px; height: 14px; }
+html.android:not(.tv) .hero-figure {
+  width: 92px;
+  aspect-ratio: 16 / 10;
+  border-radius: 8px;
+  box-shadow: var(--shadow-2);
+}
+html.android:not(.tv) .hero-figure.cover { aspect-ratio: 16 / 10; }
+html.android:not(.tv) .hero-ctrl {
+  justify-content: flex-start;
+  margin-top: 8px;
+}
+
 /* ---------- rows (carousels) ---------- */
 .rows { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 44px; padding: clamp(18px, 2.4vw, 30px) 0 72px; }
 .row-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 0 var(--gut); margin-bottom: 16px; }
