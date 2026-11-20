@@ -1,16 +1,16 @@
-// AniList account: sign in (AniList's "implicit grant" OAuth), then auto-sync both ways: your
-// Koma list/progress goes to AniList through a retry outbox (a failing push is retried, never
-// lost), and what you do elsewhere on AniList is pulled in while Koma is open. The token lives
-// only in this browser/app (localStorage) and talks to AniList directly.
+// AniList account data: the signed-in session and two-way list/progress sync.
+// OAuth itself lives in account.js, so Koma's provider credentials never have
+// to be entered by the person using the app.
 import { api } from './api.js';
 import { inList, listIds, mergeRemote, watchedSet } from './store.js';
 
 const KEY = 'koma.anilist';
 const QKEY = 'koma.sync.queue';
+const ACTIVE_KEY = 'koma.account.provider';
 const GQL = 'https://graphql.anilist.co';
-export const REDIRECT = `${location.origin}/auth/anilist`;
 
-let acct = load(); // { clientId, token, expires, user: { id, name, avatar } }
+let acct = load(); // { token, expires, user: { id, name, avatar } }
+let active = false;
 const remote = new Map(); // mediaId -> AniList entry { id, mediaId, status, progress }
 
 function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } }
@@ -19,13 +19,33 @@ function persist() {
   dispatchEvent(new CustomEvent('koma:account'));
 }
 
+export const provider = 'anilist';
+export const providerLabel = 'AniList';
 export const account = () => (acct.token && acct.expires > Date.now() ? acct.user : null);
-export const clientId = () => acct.clientId || '';
-export function setClientId(id) { acct.clientId = String(id).trim(); persist(); }
-export const loginUrl = () => `https://anilist.co/api/v2/oauth/authorize?client_id=${encodeURIComponent(clientId())}&response_type=token`;
+export const profileUrl = user => `https://anilist.co/user/${encodeURIComponent(user?.name || '')}/animelist`;
+
+/** Only the selected provider synchronizes. The other session is kept for a later switch. */
+export function setActive(value) {
+  active = !!value;
+}
+const connected = () => active && !!account();
+
+export function setSession({ accessToken, expiresIn = 365 * 86400 }) {
+  acct.token = String(accessToken || '');
+  acct.expires = Date.now() + Number(expiresIn || 0) * 1000;
+  persist();
+}
+
+export async function loadUser() {
+  const { Viewer } = await gql('query{Viewer{id name avatar{medium}}}');
+  acct.user = { id: Viewer.id, name: Viewer.name, avatar: Viewer.avatar?.medium || '' };
+  persist();
+  return acct.user;
+}
 
 export function signOut() {
   delete acct.token; delete acct.expires; delete acct.user;
+  active = false;
   remote.clear();
   persist();
 }
@@ -47,20 +67,6 @@ async function gql(query, variables = {}) {
   return d.data;
 }
 
-/** The /auth/anilist page: AniList sends the token back in the URL fragment. */
-export async function finishLogin(hash) {
-  const p = new URLSearchParams(String(hash).replace(/^#/, ''));
-  const token = p.get('access_token');
-  if (!token) throw new Error(p.get('error_description') || 'AniList didn’t send a sign-in token back.');
-  acct.token = token;
-  acct.expires = Date.now() + (Number(p.get('expires_in')) || 365 * 86400) * 1000;
-  const { Viewer } = await gql('query{Viewer{id name avatar{medium}}}');
-  acct.user = { id: Viewer.id, name: Viewer.name, avatar: Viewer.avatar?.medium || '' };
-  persist();
-  await syncNow();
-  return acct.user;
-}
-
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const maxWatched = id => { const s = watchedSet(id); return s.size ? Math.max(...s) : 0; };
 const LIST_QUERY = `query($u:Int){MediaListCollection(userId:$u,type:ANIME){lists{entries{id mediaId status progress}}}}`;
@@ -75,7 +81,7 @@ async function pullList() {
 /** A full pass: pull the AniList list into Koma, then push what's ahead of AniList. */
 let syncing = null;
 export function syncNow() {
-  if (!account()) return Promise.resolve(false);
+  if (!connected()) return Promise.resolve(false);
   return (syncing ??= (async () => {
     try {
       await pullList();
@@ -93,7 +99,7 @@ export function syncNow() {
 
 /** Reconcile from AniList alone (no pushing): what you did on anilist.co or on another device. */
 export function syncPull() {
-  if (!account()) return Promise.resolve(false);
+  if (!connected()) return Promise.resolve(false);
   return (syncing ??= (async () => { try { await pullList(); return true; } finally { syncing = null; } })());
 }
 
@@ -139,7 +145,7 @@ function schedule(at) {
 }
 
 async function pump() {
-  if (pumping || !outbox.length || !account()) return;
+  if (pumping || !outbox.length || !connected()) return;
   pumping = true;
   let calmed = null; // a Retry-After the next pump should honor
   try {
@@ -198,7 +204,7 @@ async function push(id) {
 const timers = new Map();
 addEventListener('koma:store', e => {
   const { id, remote: fromAniList } = e.detail || {};
-  if (!id || fromAniList || !account()) return;
+  if (!id || fromAniList || !connected()) return;
   clearTimeout(timers.get(id));
   timers.set(id, setTimeout(() => {
     timers.delete(id);
@@ -214,7 +220,7 @@ const PULL_EVERY = 10 * 60000;
 let lastPull = 0;
 
 function pullIfDue() {
-  if (!account() || Date.now() - lastPull < PULL_EVERY) return;
+  if (!connected() || Date.now() - lastPull < PULL_EVERY) return;
   syncPull().then(s => { if (s) lastPull = Date.now(); }).catch(() => {});
 }
 

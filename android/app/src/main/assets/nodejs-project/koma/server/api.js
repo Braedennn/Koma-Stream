@@ -5,7 +5,7 @@ import { dubIndexLoaded, ensureDubIndex, hasDub } from './dubindex.js';
 
 // The trailer rides along with every card: it is what a hovered card plays,
 // and it is a couple of dozen bytes per title next to the cover art.
-const CARD = `id title{romaji english native} coverImage{extraLarge large medium color} bannerImage
+const CARD = `id idMal title{romaji english native} coverImage{extraLarge large medium color} bannerImage
   format episodes averageScore popularity season seasonYear status description(asHtml:false)
   genres studios(isMain:true){nodes{name}} nextAiringEpisode{episode airingAt} trailer{id site}`;
 const MINI = `id title{romaji english native} coverImage{large medium color} format episodes averageScore seasonYear trailer{id site}`;
@@ -191,6 +191,21 @@ export async function many(q) {
   const d = await gql(`query($ids:[Int]){Page(perPage:50){media(id_in:$ids,type:ANIME){${CARD}}}}`, { ids }, 300);
   const byId = new Map(d.Page.media.map(m => [m.id, m]));
   return { media: ids.map(id => byId.get(id)).filter(Boolean) };
+}
+
+/** Maps MyAnimeList anime ids to Koma's AniList ids for list synchronization. */
+export async function mediaByMal(q) {
+  const ids = String(q.get('ids') || '').split(',').filter(Boolean).slice(0, 1000)
+    .map(id => int(id, 1, 1e7)).filter(id => id != null);
+  if (!ids.length) return { media: [] };
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 50) chunks.push(ids.slice(i, i + 50));
+  const parts = await Promise.all(chunks.map(chunk => gql(
+    `query($ids:[Int]){Page(perPage:50){media(idMal_in:$ids,type:ANIME){id idMal}}}`,
+    { ids: chunk }, 3600,
+  )));
+  const byMal = new Map(parts.flatMap(d => d.Page.media).map(m => [m.idMal, m]));
+  return { media: ids.map(id => byMal.get(id)).filter(Boolean) };
 }
 
 export async function anime(q, [id]) {

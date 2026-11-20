@@ -40,41 +40,72 @@ export function initVersion() {
     const applyInfo = info => {
       if (!info) return null;
       const latest = info.latest || null;
+      const failed = info.state === 'check_failed' || info.state === 'failed';
       setVer(info.current || '—');
-      if (latest && info.outdated) {
+      if (info.checking || info.state === 'idle') {
+        say('Checking for updates…', 'checking');
+        return info;
+      }
+      if (failed) {
+        say(info.error || "Couldn't check for updates", 'unknown');
+        btn.textContent = 'Retry';
+        btn.hidden = false;
+      } else if (latest && info.outdated) {
         say(`Update available — ${latest}`, 'outdated');
+        btn.textContent = 'Get the update';
         btn.hidden = false;
       } else if (latest) {
         say('Up to date', 'current');
         btn.hidden = true;
       } else {
         say("Couldn't check for updates", 'unknown');
-        btn.hidden = true;
+        btn.textContent = 'Retry';
+        btn.hidden = false;
       }
       return info;
     };
-    window.koma.version().then(applyInfo)
-      .catch(() => say("Couldn't check for updates", 'unknown'));
+    let pollGeneration = 0;
+    const waitForResult = async (generation, attempts = 180) => {
+      let info = null;
+      for (let i = 0; i < attempts; i++) {
+        if (generation !== pollGeneration) return info;
+        info = await window.koma.version();
+        if (generation !== pollGeneration) return info;
+        applyInfo(info);
+        if (!info?.checking) return info;
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      throw new Error('The update check timed out.');
+    };
+    const beginPolling = () => {
+      const generation = ++pollGeneration;
+      return waitForResult(generation).catch(error => {
+        if (generation !== pollGeneration) return null;
+        say(error.message || "Couldn't check for updates", 'unknown');
+        btn.textContent = 'Retry';
+        btn.hidden = false;
+      });
+    };
+    beginPolling();
 
     // "Get the update" asks the shell to check again. The native Android
     // updater checks in the background, so wait briefly for its verdict; the
     // desktop shell reports the finished result straight away.
     btn.addEventListener('click', async () => {
+      const generation = ++pollGeneration;
       btn.disabled = true;
       say('Checking…', 'checking');
       try {
         await window.koma.update?.check?.();
-        let info = null;
-        for (let i = 0; i < 20; i++) {
-          info = await window.koma.version();
-          if (!info?.checking) break;
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        applyInfo(info);
+        await waitForResult(generation);
       } catch {
+        if (generation !== pollGeneration) return;
         say("Couldn't check for updates", 'unknown');
+        btn.textContent = 'Retry';
+        btn.hidden = false;
+      } finally {
+        if (generation === pollGeneration) btn.disabled = false;
       }
-      btn.disabled = false;
     });
     return;
   }

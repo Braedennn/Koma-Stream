@@ -90,21 +90,23 @@
   </nav>
 </dialog>
 
-<dialog class="modal" id="al-setup" aria-labelledby="al-setup-title">
+<dialog class="modal" id="account-setup" aria-labelledby="account-setup-title">
   <form method="dialog" class="modal-body">
-    <h2 id="al-setup-title">Connect your AniList account</h2>
-    <p>AniList needs a free “API client” on your account before Koma can sign in. You only do this once:</p>
-    <ol>
-      <li>Open <a href="https://anilist.co/settings/developer" target="_blank" rel="noopener">AniList developer settings</a> and click <b>Create New Client</b>.</li>
-      <li>Name it <b>Koma</b> and set the <b>Redirect URL</b> to:
-        <span class="copy-row"><code id="al-redirect"></code><button class="btn btn-ghost btn-sm" type="button" data-copy-redirect>Copy</button></span></li>
-      <li>Save, then paste the <b>Client ID</b> (a number) here:</li>
-    </ol>
-    <label class="field"><span class="sr">Client ID</span><input id="al-client" inputmode="numeric" autocomplete="off" placeholder="Client ID, e.g. 12345"></label>
-    <p class="modal-err" id="al-err" hidden></p>
+    <h2 id="account-setup-title">Connect your account</h2>
+    <p>Choose where Koma should keep your list and watch progress.</p>
+    <div class="provider-choices">
+      <button class="provider-choice" type="button" data-provider="anilist">
+        <span class="provider-mark provider-anilist" aria-hidden="true">AL</span>
+        <span><b>AniList</b><small>Sync your anime list and progress</small></span>
+      </button>
+      <button class="provider-choice" type="button" data-provider="myanimelist">
+        <span class="provider-mark provider-mal" aria-hidden="true">MAL</span>
+        <span><b>MyAnimeList</b><small>Sync your anime list and progress</small></span>
+      </button>
+    </div>
+    <p class="modal-err" id="auth-err" hidden></p>
     <div class="modal-actions">
       <button class="btn btn-ghost btn-sm" value="cancel" formnovalidate>Cancel</button>
-      <button class="btn btn-primary btn-sm" value="ok" id="al-continue">Continue to AniList</button>
     </div>
   </form>
 </dialog>
@@ -228,6 +230,7 @@
         <span>Restore from a backup file</span>
         <button class="btn btn-ghost btn-sm" type="button" data-restore hidden>Import</button>
       </label>
+      <p class="settings-note">Account sign-ins stay on this device and are not included in backup files.</p>
       <label class="settings-row">
         <span>Clear my progress and list</span>
         <button class="btn btn-ghost btn-sm" type="button" data-reset>Reset</button>

@@ -307,6 +307,79 @@ body.bar-dragging { user-select: none; cursor: grabbing; }
 .hero.paused .dot.on i { animation-play-state: paused; }
 @keyframes fill { to { width: 100%; } }
 
+
+/* ---------- Android phone Spotlight ----------
+   The phone uses the compact native composition: badge, title, facts and
+   actions on the left, with a small artwork panel on the right. Every rule
+   is scoped so the restored desktop and television Spotlights stay intact. */
+html.android:not(.tv) .hero { padding: calc(var(--head-h) + 10px) var(--gut) 0; }
+html.android:not(.tv) .slide.on {
+  grid-template-columns: minmax(0, 1fr) auto;
+  justify-items: stretch;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+html.android:not(.tv) .hero-body { width: auto; max-width: none; min-width: 0; }
+html.android:not(.tv) .hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(248, 248, 248, .06);
+  border: 1px solid var(--line-2);
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 600;
+  overflow: hidden;
+}
+html.android:not(.tv) .hero-badge .i { width: 11px; height: 11px; }
+html.android:not(.tv) .hero-title {
+  margin: 6px 0 0;
+  max-width: 28ch;
+  font-size: clamp(18px, 5.1vw, 24px);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -.03em;
+  text-wrap: balance;
+  color: var(--text);
+}
+html.android:not(.tv) .hero-meta {
+  justify-content: flex-start;
+  gap: 3px 8px;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 500;
+}
+html.android:not(.tv) .hero-meta > span + span::before { margin-right: 6px; }
+html.android:not(.tv) .hero-meta .i { width: 11px; height: 11px; }
+html.android:not(.tv) .hero-sub { display: none; }
+html.android:not(.tv) .hero-actions {
+  justify-content: flex-start;
+  gap: 4px;
+  margin-top: 9px;
+}
+html.android:not(.tv) .hero-actions .btn {
+  height: 30px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  gap: 4px;
+}
+html.android:not(.tv) .hero-actions .btn .i { width: 14px; height: 14px; }
+html.android:not(.tv) .hero-figure {
+  width: 92px;
+  aspect-ratio: 16 / 10;
+  border-radius: 8px;
+  box-shadow: var(--shadow-2);
+}
+html.android:not(.tv) .hero-figure.cover { aspect-ratio: 16 / 10; }
+html.android:not(.tv) .hero-ctrl {
+  justify-content: flex-start;
+  margin-top: 8px;
+}
+
 /* ---------- rows (carousels) ---------- */
 .rows { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 44px; padding: clamp(18px, 2.4vw, 30px) 0 72px; }
 .row-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 0 var(--gut); margin-bottom: 16px; }
@@ -869,7 +942,7 @@ html.fs-video #app > div { animation: none; transform: none; }
 .acct-menu [role="menuitem"] .i { width: 16px; height: 16px; }
 .acct-menu [role="menuitem"]:hover { background: var(--bg-2); color: var(--text); }
 
-/* ---------- modal (AniList setup) ---------- */
+/* ---------- modal (account provider chooser) ---------- */
 /* A dialog is a little page of its own: while it is open the page behind it
    stands still. Without this the focus moving inside the panel drags the
    page along with it - and on a television, pressing up at the top of the
@@ -890,6 +963,40 @@ html.dlg-open, html.dlg-open body { overflow: hidden; }
 .modal-err { color: var(--live) !important; font-size: 13px !important; margin: -4px 0 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .modal .fine { font-size: 12.5px; margin: -4px 0 0; }
+.provider-choices { display: grid; gap: 10px; }
+.provider-choice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--bg-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-ui) var(--ease-soft), background var(--dur-ui) var(--ease-soft), transform var(--dur-ui) var(--ease-out);
+}
+.provider-choice:hover, .provider-choice:focus-visible { border-color: var(--accent); background: var(--bg); transform: translateY(-1px); }
+.provider-choice:disabled { opacity: .55; cursor: wait; transform: none; }
+.provider-choice > span:last-child { display: grid; gap: 3px; min-width: 0; }
+.provider-choice b { font-size: 15px; }
+.provider-choice small { color: var(--text-3); font-size: 12.5px; }
+.provider-mark {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+}
+.provider-anilist { background: #02a9ff; }
+.provider-mal { background: #2e51a2; }
 
 /* ---------- settings ---------- */
 .settings-modal { width: min(560px, calc(100vw - 32px)); max-height: min(86vh, 720px); overflow: hidden; }
@@ -1145,7 +1252,7 @@ html.dlg-open, html.dlg-open body { overflow: hidden; }
 .kplayer.kp-fill video { object-fit: fill; }
 .kplayer.kp-whole .kp-ambient { opacity: 1; }
 .kplayer.idle { cursor: none; }
-.kp-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0, 0, 0, .65), transparent 22%, transparent 60%, rgba(0, 0, 0, .82)); opacity: 0; transition: opacity .2s var(--ease); pointer-events: none; }
+.kp-shade { position: absolute; z-index: 2; inset: 0; background: linear-gradient(180deg, rgba(0, 0, 0, .65), transparent 22%, transparent 60%, rgba(0, 0, 0, .82)); opacity: 0; transition: opacity .2s var(--ease); pointer-events: none; }
 .kplayer.playing:not(.idle) .kp-shade, .kplayer:not(.playing) .kp-shade { opacity: 1; }
 .kp-top { position: absolute; top: 0; left: 0; right: 0; z-index: 4; display: flex; align-items: flex-start; justify-content: space-between; padding: 16px 20px 36px; pointer-events: none; }
 .kp-now { min-width: 0; }
@@ -1249,6 +1356,7 @@ html.dlg-open, html.dlg-open body { overflow: hidden; }
 .kp-menu { position: absolute; z-index: 8; right: 16px; bottom: 66px; width: 270px; max-height: min(440px, calc(100% - 84px)); overflow-y: auto; padding: 7px; border-radius: var(--r); background: rgba(20, 20, 20, .94); border: 1px solid rgba(255, 255, 255, .12); box-shadow: 0 28px 64px -18px rgba(0, 0, 0, .9); animation: rise .22s var(--ease-out) both; overscroll-behavior: contain; backdrop-filter: blur(14px); }
 .kp-sec + .kp-sec { margin-top: 5px; padding-top: 5px; border-top: 1px solid rgba(255, 255, 255, .08); }
 .kp-sec h5 { margin: 4px 8px; font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: rgba(255, 255, 255, .4); }
+.kp-menu-note { padding: 8px 10px; color: rgba(255, 255, 255, .48); font-size: 12.5px; }
 .kp-menu [role="menuitemradio"] { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r-sm); background: none; color: rgba(255, 255, 255, .85); font-size: 13.5px; font-weight: 550; cursor: pointer; text-align: left; transition: background .14s; }
 .kp-menu [role="menuitemradio"]:hover { background: rgba(255, 255, 255, .1); }
 .kp-menu [role="menuitemradio"][aria-checked="true"] { color: #fff; font-weight: 650; }

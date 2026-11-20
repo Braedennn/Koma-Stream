@@ -4176,6 +4176,7 @@ nodejs-project/anivault/node_modules/zip-stream/README.md
 nodejs-project/anivault/node_modules/zip-stream/index.js
 nodejs-project/anivault/node_modules/zip-stream/package.json
 nodejs-project/anivault/package.json
+nodejs-project/koma/auth.json
 nodejs-project/koma/public/css/koma.css
 nodejs-project/koma/public/css/styles.css
 nodejs-project/koma/public/css/tv.css
@@ -4183,6 +4184,7 @@ nodejs-project/koma/public/favicon.svg
 nodejs-project/koma/public/icon-192.png
 nodejs-project/koma/public/icon-512.png
 nodejs-project/koma/public/index.html
+nodejs-project/koma/public/js/account.js
 nodejs-project/koma/public/js/anilist.js
 nodejs-project/koma/public/js/api.js
 nodejs-project/koma/public/js/canvas.js
@@ -4194,6 +4196,7 @@ nodejs-project/koma/public/js/library.js
 nodejs-project/koma/public/js/links.js
 nodejs-project/koma/public/js/main.js
 nodejs-project/koma/public/js/motion.js
+nodejs-project/koma/public/js/myanimelist.js
 nodejs-project/koma/public/js/notify.js
 nodejs-project/koma/public/js/player.js
 nodejs-project/koma/public/js/presence.js
@@ -4224,6 +4227,7 @@ nodejs-project/koma/server/anilist.js
 nodejs-project/koma/server/api.js
 nodejs-project/koma/server/audio-lang.js
 nodejs-project/koma/server/audio.js
+nodejs-project/koma/server/auth.js
 nodejs-project/koma/server/data/audio.json
 nodejs-project/koma/server/data/dubindex.json
 nodejs-project/koma/server/dubindex.js

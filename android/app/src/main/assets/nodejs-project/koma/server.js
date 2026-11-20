@@ -10,6 +10,7 @@ import { proxyJson, proxyMedia, ping } from './server/streaming.js';
 import { audioCounts } from './server/audio.js';
 import { ensureDubIndex } from './server/dubindex.js';
 import { handleRoom, lanAddress, roomInfo, setLanHandler } from './server/room.js';
+import * as auth from './server/auth.js';
 import { spawn } from 'node:child_process';
 
 if (typeof fetch !== 'function') {
@@ -30,7 +31,7 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
   '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8',
 };
-const PAGES = /^\/(?:anime\/\d+|watch\/\d+|browse|schedule|list|auth\/anilist|join)?\/?$/;
+const PAGES = /^\/(?:anime\/\d+|watch\/\d+|browse|schedule|list|auth\/(?:anilist|myanimelist)|join)?\/?$/;
 const API = [
   [/^\/api\/home$/, api.home],
   [/^\/api\/genres$/, api.genres],
@@ -38,6 +39,7 @@ const API = [
   [/^\/api\/browse$/, api.browse],
   [/^\/api\/suggest$/, api.suggest],
   [/^\/api\/media$/, api.many],
+  [/^\/api\/media\/mal$/, api.mediaByMal],
   [/^\/api\/anime\/(\d+)$/, api.anime],
   [/^\/api\/anime\/(\d+)\/episodes$/, api.episodes],
   [/^\/api\/schedule$/, api.schedule],
@@ -53,7 +55,7 @@ const SECURITY = {
       // plain browser tab (inside the app the shell asks GitHub itself).
       // http://*:* is the local network: a watch-together session talks to the
       // host's own Koma server, wherever it sits on the Wi-Fi.
-      "connect-src 'self' http://*:* https://graphql.anilist.co https://api.github.com",
+      "connect-src 'self' http://*:* https://graphql.anilist.co https://api.myanimelist.net https://api.github.com",
       "media-src 'self' blob:", "worker-src 'self' blob:", 'frame-src https:', "base-uri 'self'", "form-action 'self'",
     ].join('; '),
 };
@@ -68,6 +70,19 @@ async function send(req, res, status, body, type, extra = {}) {
   headers['Content-Length'] = buf.length;
   res.writeHead(status, headers);
   res.end(req.method === 'HEAD' ? undefined : buf);
+}
+
+async function readJson(req, limit = 32 * 1024) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) throw Object.assign(new Error('The request body is too large.'), { status: 413 });
+    chunks.push(chunk);
+  }
+  if (!size) return {};
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  catch { throw Object.assign(new Error('The request body is not valid JSON.'), { status: 400 }); }
 }
 
 // Static files are read and gzipped once per version (hls.js alone is 600 KB), not on every request.
@@ -100,6 +115,14 @@ async function handle(req, res, { lan = false } = {}) {
   const url = new URL(req.url, 'http://localhost');
   const path = url.pathname;
 
+  // OAuth exchanges use Koma's private application credentials. They are a
+  // local-browser operation even when standalone Koma is serving the network.
+  if (path.startsWith('/api/auth/')) {
+    const address = String(req.socket?.remoteAddress || '');
+    const local = /^(127\.|::1$|::ffff:127\.)/i.test(address);
+    if (!local) return send(req, res, 403, '{"error":"Account sign-in is available only on this device."}', TYPES['.json']);
+  }
+
   // The network door only answers for sessions: the room's API and the
   // invite page. The rest of Koma stays on the loopback.
   if (lan && !path.startsWith('/api/room/') && !/^\/join\/[A-Za-z0-9]{4,10}\/?$/.test(path)) {
@@ -107,6 +130,25 @@ async function handle(req, res, { lan = false } = {}) {
   }
 
   if (path.startsWith('/api/')) {
+    if (path === '/api/auth/config') {
+      return send(req, res, 200, JSON.stringify(auth.publicConfig()), TYPES['.json'], { 'Cache-Control': 'no-store' });
+    }
+    if (path.startsWith('/api/auth/')) {
+      if (req.method !== 'POST') return send(req, res, 405, '{"error":"Use POST."}', TYPES['.json'], { Allow: 'POST' });
+      try {
+        const body = await readJson(req);
+        let result;
+        if (path === '/api/auth/anilist/exchange') result = await auth.exchangeAniList(body);
+        else if (path === '/api/auth/myanimelist/exchange') result = await auth.exchangeMyAnimeList(body);
+        else if (path === '/api/auth/myanimelist/refresh') result = await auth.refreshMyAnimeList(body);
+        else return send(req, res, 404, '{"error":"No such endpoint."}', TYPES['.json']);
+        return send(req, res, 200, JSON.stringify(result), TYPES['.json'], { 'Cache-Control': 'no-store' });
+      } catch (err) {
+        const status = err.status || 502;
+        if (status >= 500) console.error(`[auth] ${path}: ${err.message}`);
+        return send(req, res, status, JSON.stringify({ error: err.message }), TYPES['.json'], { 'Cache-Control': 'no-store' });
+      }
+    }
     // Watch-together rooms: the host's server is talked to from another
     // machine, so these take POST and answer with CORS headers.
     if (path.startsWith('/api/room/')) {
@@ -203,7 +245,9 @@ const server = http.createServer((req, res) => {
   const start = Date.now();
   res.on('finish', () => {
     if (process.env.QUIET) return;
-    console.log(`${res.statusCode} ${req.method} ${req.url} ${Date.now() - start}ms`);
+    // Authorization callbacks carry codes and state. Keep those out of logs.
+    const shown = req.url?.startsWith('/auth/') ? req.url.split('?')[0] : req.url;
+    console.log(`${res.statusCode} ${req.method} ${shown} ${Date.now() - start}ms`);
   });
   handle(req, res).catch(err => {
     console.error(err);
