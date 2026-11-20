@@ -8,6 +8,7 @@ import { $, $$, esc, toast } from './ui.js';
 import { ccLangPref, getPref, pictureMode, setPref } from './player.js';
 import { getAudioPref, setAudioPref } from './streaming.js';
 import { previewsOn, setPreviewsOn } from './preview.js';
+import { motionOn, setMotion } from './motion.js';
 
 /* The preferences the panel shows, and what they mean. */
 const PREFS = ['autoNext', 'skipIntro', 'skipOutro', 'autoplay'];
@@ -55,6 +56,8 @@ function paint() {
   }
   const previews = $('[data-set-previews]', dlg);
   if (previews) previews.checked = previewsOn();
+  const motion = $('[data-set-motion]', dlg);
+  if (motion) motion.checked = motionOn();
   const tray = $('[data-set-tray]', dlg);
   if (tray) tray.checked = getTray();
   // the app-only group is pointless in a plain browser
@@ -173,6 +176,11 @@ export function initSettings({ onTheme, onAudio } = {}) {
     if (e.target.matches('[data-set-previews]')) {
       setPreviewsOn(e.target.checked);
       toast(e.target.checked ? 'Cards play their trailer when you point at them' : 'Hover previews are off');
+      return;
+    }
+    if (e.target.matches('[data-set-motion]')) {
+      setMotion(e.target.checked);
+      toast(e.target.checked ? 'The app moves again' : 'The app holds still now');
       return;
     }
     const i = e.target.closest('[data-set-pref]');

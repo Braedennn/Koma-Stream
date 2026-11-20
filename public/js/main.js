@@ -12,7 +12,7 @@ import { list } from './views/list.js';
 import { stats } from './views/stats.js';
 import { notFound } from './views/notfound.js';
 import { initAudioBadges } from './streaming.js';
-import { abandon, arrive, initMotion, swapView } from './motion.js';
+import { abandon, applyMotion, arrive, initMotion, swapView } from './motion.js';
 import { initSettings } from './settings.js';
 import { initDialogs } from './dialog.js';
 import { initNotifications } from './notify.js';
@@ -511,6 +511,7 @@ surprise?.addEventListener('click', async () => {
   }
 });
 
+applyMotion(); // the stillness preference is on the root before the first page turns
 initMotion($('#app'));
 render();
 initRoomUI();

@@ -5,6 +5,24 @@
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 
+/* ---------- the preference ----------
+ *
+ * Slow hardware pays for the page-turn and the staggered arrivals twice: once
+ * in the composite and once in the frame budget the remote has to wait for. So
+ * the motion is a choice, not a fact. It lives beside the other preferences,
+ * and the stylesheet answers it through one class on the root. */
+const MOTION_KEY = 'koma.motion';
+export const motionOn = () => {
+  try { return localStorage.getItem(MOTION_KEY) !== '0'; } catch { return true; }
+};
+export const setMotion = on => {
+  try { localStorage.setItem(MOTION_KEY, on ? '1' : '0'); } catch { /* private mode */ }
+  applyMotion();
+};
+export function applyMotion() {
+  document.documentElement.classList.toggle('no-motion', !motionOn());
+}
+
 /* The blocks that rise into place as they reach the screen. */
 const REVEAL = '.row, .grid, .genre-grid, .take-grid, .badge-grid, .ep-grid, .week-grid';
 
@@ -31,7 +49,7 @@ function reveal(el) {
  * nothing is ever left waiting for a scroll that will not come.
  */
 export function initMotion(root) {
-  if (reduced.matches || !('IntersectionObserver' in window)) return;
+  if (reduced.matches || !motionOn() || !('IntersectionObserver' in window)) return;
 
   observer = new IntersectionObserver((entries, obs) => {
     for (const e of entries) {
@@ -99,7 +117,7 @@ export function swapView(app, root) {
   const outgoing = live;
   live = root;
 
-  if (!outgoing || outgoing === root || reduced.matches) {
+  if (!outgoing || outgoing === root || reduced.matches || !motionOn()) {
     app.replaceChildren(root);
     root.classList.add('view-in');
     return;

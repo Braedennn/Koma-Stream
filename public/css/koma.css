@@ -1677,4 +1677,10 @@ html.android .scroll-rail { display: none; }
 /* nothing may stay hidden waiting for an animation that will never run */
 .reveal, .reveal.in { opacity: 1 !important; transform: none !important; animation: none !important; }
 }
+
+/* The same stillness, asked for in Settings rather than by the system: a
+   television or a small processor spends its budget on the page, not on the
+   page-turn. One class on the root, and everything holds still. */
+html.no-motion *, html.no-motion *::before, html.no-motion *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+html.no-motion .reveal, html.no-motion .reveal.in { opacity: 1 !important; transform: none !important; animation: none !important; }
 .kplayer video::cue { background: rgba(0, 0, 0, .55); color: #fff; font-family: var(--font); font-weight: 500; line-height: 1.35; text-shadow: 0 1px 3px rgba(0, 0, 0, .9); }
