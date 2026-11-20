@@ -279,9 +279,12 @@ async function runDiagnose() {
 
 /* Backup header: what this payload is, and which way it moves. */
 const BACKUP = { app: 'koma', kind: 'local-data', version: 1 };
+// Access and refresh tokens are account credentials, not ordinary local data.
+// They stay on the device and never enter a shareable backup file.
+const SENSITIVE_KEYS = new Set(['koma.anilist', 'koma.myanimelist']);
 const localKeys = () => {
   const out = [];
-  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k?.startsWith('koma.')) out.push(k); } } catch { /* private mode */ }
+  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k?.startsWith('koma.') && !SENSITIVE_KEYS.has(k)) out.push(k); } } catch { /* private mode */ }
   return out;
 };
 
@@ -318,7 +321,7 @@ async function restoreBackup() {
   }
   let n = 0;
   for (const [k, v] of Object.entries(d.keys)) {
-    if (!k.startsWith('koma.') || typeof v !== 'string') continue;
+    if (!k.startsWith('koma.') || SENSITIVE_KEYS.has(k) || typeof v !== 'string') continue;
     try { localStorage.setItem(k, v); n++; } catch { /* too full, private mode */ }
   }
   toast(n ? `Restored ${n} piece${n === 1 ? '' : 's'} of data — reloading` : 'That backup was empty');

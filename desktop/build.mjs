@@ -65,6 +65,23 @@ async function main() {
   copy(path.join(site, 'package.json'), path.join(sSite, 'package.json'));
   copy(path.join(site, 'server'), path.join(sSite, 'server'));
   copy(path.join(site, 'public'), path.join(sSite, 'public'));
+  // Koma's OAuth applications are private build configuration, not source.
+  const oauthConfig = path.join(site, '.data', 'auth', 'oauth.json');
+  if (!fs.existsSync(oauthConfig)) {
+    throw new Error('The private OAuth configuration is missing: .data/auth/oauth.json');
+  }
+  let oauth;
+  try { oauth = JSON.parse(fs.readFileSync(oauthConfig, 'utf8')); }
+  catch (error) { throw new Error(`The private OAuth configuration is not valid JSON: ${error.message}`); }
+  for (const provider of ['anilist', 'myanimelist']) {
+    if (!String(oauth?.[provider]?.clientId || '').trim()) {
+      throw new Error(`The ${provider} OAuth client ID is missing from .data/auth/oauth.json`);
+    }
+    if (!String(oauth?.[provider]?.clientSecret || '').trim()) {
+      throw new Error(`The ${provider} OAuth client secret is missing from .data/auth/oauth.json`);
+    }
+  }
+  copy(oauthConfig, path.join(sSite, 'auth.json'));
   // AniVault: compiled output + config + production-only dependencies
   const sAni = path.join(stage, 'anivault');
   fs.mkdirSync(sAni, { recursive: true });

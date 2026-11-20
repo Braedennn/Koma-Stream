@@ -28,8 +28,23 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="http" android:host="anilist.co" />
-                <data android:scheme="https" android:host="anilist.co" />
+                <data android:scheme="http" android:host="anilist.co" android:pathPrefix="/anime" />
+                <data android:scheme="https" android:host="anilist.co" android:pathPrefix="/anime" />
+                <data android:scheme="http" android:host="anilist.co" android:pathPrefix="/user" />
+                <data android:scheme="https" android:host="anilist.co" android:pathPrefix="/user" />
+            </intent-filter>
+            <!-- The provider's localhost callback is bridged into this package. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="${applicationId}" android:host="auth" android:pathPrefix="/anilist" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="${applicationId}" android:host="auth" android:pathPrefix="/myanimelist" />
             </intent-filter>
         </activity>
 

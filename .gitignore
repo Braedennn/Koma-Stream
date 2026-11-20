@@ -29,3 +29,7 @@ android/*.apk
 
 # internal handoff notes
 Servers - DONT TOUCH/TODO.md
+
+# local release material and generated private OAuth configuration
+/release/
+/android/app/src/main/assets/nodejs-project/koma/auth.json

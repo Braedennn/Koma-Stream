@@ -15,7 +15,7 @@ A dark, modern anime streaming app for Windows, Android phones and Android TVs �
 **Catalog & tracking**
 - Live data from AniList: trending, seasonal, all-time top 10, genres, search with instant suggestions
 - Weekly airing schedule with countdowns, in your timezone
-- Personal list, watch progress, resume points, "continue watching" — saved locally, synced with your AniList account if you sign in
+- Personal list, watch progress, resume points, "continue watching" — saved locally, with optional two-way list/progress sync to either AniList or MyAnimeList
 - Sub/dub episode counts on every poster, so you know before you click
 
 **The player**

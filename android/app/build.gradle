@@ -1,3 +1,9 @@
+import groovy.json.JsonSlurper
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.KeyStore
+import java.security.MessageDigest
+
 plugins {
     id 'com.android.application'
 }
@@ -10,13 +16,211 @@ def releaseSigning = new Properties()
 if (releaseSigningFile.exists()) {
     releaseSigningFile.withInputStream { releaseSigning.load(it) }
 }
-def hasReleaseSigning = releaseSigning.getProperty('storeFile') && releaseSigning.getProperty('storePassword') &&
-        releaseSigning.getProperty('keyAlias') && releaseSigning.getProperty('keyPassword')
+def signingValue = { String name -> releaseSigning.getProperty(name) }
+def hasReleaseSigning = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].every {
+    def value = signingValue(it)
+    value != null && !value.trim().isEmpty()
+}
+def releaseStoreFile = hasReleaseSigning ? rootProject.file(signingValue('storeFile')) : null
+
+// The permanent certificate and the release's exact Android version live in
+// version-controlled, non-secret identity data. The private keystore and its
+// passwords remain outside Git.
+def releaseIdentityFile = rootProject.file('release-identity.properties')
+def releaseIdentity = new Properties()
+if (releaseIdentityFile.exists()) {
+    releaseIdentityFile.withInputStream { releaseIdentity.load(it) }
+}
+def identityValue = { String name -> releaseIdentity.getProperty(name)?.trim() }
+def expectedVersionName = identityValue('versionName')
+def expectedVersionCode = identityValue('versionCode') as Integer
+def previousVersionCode = identityValue('previousVersionCode') as Integer
+def expectedCertificate = identityValue('certificateSha256')?.replaceAll('\\s+', '')?.toUpperCase(Locale.US)
+
+// The OAuth application settings are private build configuration. A release
+// needs both public client IDs; AniList may use its public implicit flow when
+// no client secret is configured, while MyAnimeList uses PKCE.
+def oauthConfigFile = rootProject.file('../.data/auth/oauth.json')
+def oauthConfig = [:]
+if (oauthConfigFile.exists()) {
+    try {
+        oauthConfig = new JsonSlurper().parseText(oauthConfigFile.getText('UTF-8')) ?: [:]
+    } catch (error) {
+        throw new GradleException("The OAuth configuration is not valid JSON: ${error.message}", error)
+    }
+}
+def oauthCredential = { String provider, String name ->
+    def section = oauthConfig[provider]
+    def value = section instanceof Map ? section[name] : null
+    return value == null ? '' : value.toString().trim()
+}
 
 // Gradle properties make local test builds possible without editing this file:
 // -PkomaVersionName=1.7.16 -PkomaVersionCode=101
 def appVersionName = providers.gradleProperty('komaVersionName').orElse('1.7.17').get()
 def appVersionCode = providers.gradleProperty('komaVersionCode').map { it.toInteger() }.orElse(10717).get()
+
+def parseVersion = { String raw ->
+    def match = (raw ?: '').trim() =~ /^[vV]?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/
+    if (!match.matches()) return null
+    [match.group(1) as long, (match.group(2) ?: '0') as long, (match.group(3) ?: '0') as long]
+}
+def compareVersions = { left, right ->
+    for (int i = 0; i < 3; i++) {
+        if (left[i] != right[i]) return left[i] < right[i] ? -1 : 1
+    }
+    return 0
+}
+def latestPublishedRelease = {
+    def connection = (HttpURLConnection) new URL(
+            'https://api.github.com/repos/Braedennn/Koma-Stream/releases/latest').openConnection()
+    connection.connectTimeout = 15000
+    connection.readTimeout = 15000
+    connection.setRequestProperty('Accept', 'application/vnd.github+json')
+    connection.setRequestProperty('User-Agent', 'Koma-Android-Release-Preflight')
+    try {
+        if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+            throw new GradleException("GitHub returned HTTP ${connection.responseCode} while checking the latest release.")
+        }
+        def release = new JsonSlurper().parseText(connection.inputStream.getText('UTF-8'))
+        if (!release.tag_name) throw new GradleException('The latest GitHub release has no tag name.')
+        return release
+    } finally {
+        connection.disconnect()
+    }
+}
+
+// The APK carries a generated copy of the site. Always rebuild that copy
+// before Android merges its assets, so a release cannot silently package the
+// previous account UI or server routes.
+def syncKomaAssets = tasks.register('syncKomaAssets', Exec) {
+    group = 'build'
+    description = 'Copies the current Koma site and private OAuth configuration into the APK assets.'
+    workingDir rootProject.projectDir
+    commandLine 'node', 'sync-assets.mjs'
+    outputs.dir(rootProject.file('app/src/main/assets/nodejs-project'))
+    outputs.upToDateWhen { false }
+}
+
+tasks.configureEach { task ->
+    if (task.name ==~ /merge(Phone|Tv)(Debug|Release)Assets/ || task.name.toLowerCase().contains('lint')) {
+        task.dependsOn(syncKomaAssets)
+    }
+}
+
+def validateKomaAssets = tasks.register('validateKomaAssets') {
+    group = 'verification'
+    description = 'Checks that the generated APK site contains the current account implementation.'
+    dependsOn(syncKomaAssets)
+    doLast {
+        def assets = rootProject.file('app/src/main/assets/nodejs-project/koma')
+        def required = [
+            'public/js/account.js',
+            'public/js/myanimelist.js',
+            'server/auth.js',
+            'public/index.html',
+        ]
+        required.each { relative ->
+            if (!new File(assets, relative).isFile()) {
+                throw new GradleException("The generated Android site is missing ${relative}.")
+            }
+        }
+        def index = new File(assets, 'public/index.html').getText('UTF-8')
+        if (!index.contains('data-provider="anilist"') || !index.contains('data-provider="myanimelist"')) {
+            throw new GradleException('The generated Android site does not contain the account provider chooser.')
+        }
+        if (!new File(assets, 'auth.json').isFile()) {
+            throw new GradleException('The generated Android site has no private OAuth configuration.')
+        }
+    }
+}
+
+def validateKomaRelease = tasks.register('validateKomaRelease') {
+    group = 'verification'
+    description = 'Fails closed unless the permanent signing key and a newer published version are present.'
+    dependsOn(validateKomaAssets)
+    doLast {
+        if (!hasReleaseSigning) {
+            throw new GradleException('Release signing is missing. Configure .data/android/release-signing.properties.')
+        }
+        ['anilist', 'myanimelist'].each { provider ->
+            if (!oauthCredential(provider, 'clientId')) {
+                throw new GradleException("The ${provider} OAuth client ID is missing from .data/auth/oauth.json.")
+            }
+            if (!oauthCredential(provider, 'clientSecret')) {
+                throw new GradleException("The ${provider} OAuth client secret is missing from .data/auth/oauth.json.")
+            }
+        }
+        if (!releaseStoreFile.isFile()) {
+            throw new GradleException("The release keystore does not exist: ${releaseStoreFile}")
+        }
+
+        def storePassword = signingValue('storePassword')
+        def keyAlias = signingValue('keyAlias')
+        def keyPassword = signingValue('keyPassword')
+        def certificate = null
+        def lastError = null
+        for (String type : ['JKS', 'PKCS12']) {
+            try {
+                def keyStore = KeyStore.getInstance(type)
+                keyStore.load(new FileInputStream(releaseStoreFile), storePassword.toCharArray())
+                def key = keyStore.getKey(keyAlias, keyPassword.toCharArray())
+                if (key == null || keyStore.getCertificate(keyAlias) == null) {
+                    throw new GradleException("The release keystore has no usable key for alias '${keyAlias}'.")
+                }
+                certificate = keyStore.getCertificate(keyAlias)
+                break
+            } catch (GradleException error) {
+                throw error
+            } catch (Exception error) {
+                lastError = error
+            }
+        }
+        if (certificate == null) {
+            throw new GradleException("The release keystore, alias, or key password is invalid: ${lastError.message}", lastError)
+        }
+
+        def fingerprint = MessageDigest.getInstance('SHA-256')
+                .digest(certificate.getEncoded())
+                .collect { String.format('%02X', it & 0xff) }
+                .join(':')
+        if (!expectedCertificate || fingerprint != expectedCertificate) {
+            throw new GradleException(
+                    "The release certificate is ${fingerprint}, but ${expectedCertificate ?: 'no fingerprint'} is required.")
+        }
+
+        if (expectedVersionName != appVersionName || expectedVersionCode != appVersionCode) {
+            throw new GradleException(
+                    "This build is ${appVersionName} (${appVersionCode}), but the release identity requires " +
+                    "${expectedVersionName} (${expectedVersionCode}).")
+        }
+        if (previousVersionCode == null || appVersionCode <= previousVersionCode) {
+            throw new GradleException(
+                    "Version code ${appVersionCode} must be greater than ${previousVersionCode}.")
+        }
+
+        def current = parseVersion(appVersionName)
+        if (!current || appVersionCode <= 0) {
+            throw new GradleException('The Android release needs a numeric version name and a positive version code.')
+        }
+        def release = latestPublishedRelease()
+        def published = parseVersion(release.tag_name.toString())
+        if (!published) {
+            throw new GradleException("The latest release tag cannot be compared numerically: ${release.tag_name}")
+        }
+        if (compareVersions(current, published) <= 0) {
+            throw new GradleException(
+                    "Version ${appVersionName} is not newer than the published release ${published.join('.')}.")
+        }
+    }
+}
+
+// Both release flavors depend on the same fail-closed preflight.
+tasks.configureEach { task ->
+    if (task.name == 'prePhoneReleaseBuild' || task.name == 'preTvReleaseBuild') {
+        task.dependsOn(validateKomaRelease)
+    }
+}
 
 android {
     namespace 'com.koma.app'
@@ -83,10 +287,10 @@ android {
     signingConfigs {
         if (hasReleaseSigning) {
             release {
-                storeFile rootProject.file(releaseSigning.getProperty('storeFile'))
-                storePassword releaseSigning.getProperty('storePassword')
-                keyAlias releaseSigning.getProperty('keyAlias')
-                keyPassword releaseSigning.getProperty('keyPassword')
+                storeFile releaseStoreFile
+                storePassword signingValue('storePassword')
+                keyAlias signingValue('keyAlias')
+                keyPassword signingValue('keyPassword')
             }
         }
     }

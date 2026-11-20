@@ -5,7 +5,7 @@
 // through its own local server — only the playhead travels, so the host never
 // carries anyone else's video.
 import { $, $$, esc, toast } from './ui.js';
-import { account } from './anilist.js';
+import { account } from './account.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 

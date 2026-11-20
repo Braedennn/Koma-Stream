@@ -47,6 +47,10 @@ cpSync(join(repo, 'server.js'), join(project, 'koma', 'server.js'));
 cpSync(join(repo, 'server'), join(project, 'koma', 'server'), { recursive: true });
 cpSync(join(repo, 'public'), join(project, 'koma', 'public'), { recursive: true });
 
+// Koma's OAuth applications are private build configuration, not source.
+const oauthConfig = join(repo, '.data', 'auth', 'oauth.json');
+if (existsSync(oauthConfig)) cpSync(oauthConfig, join(project, 'koma', 'auth.json'));
+
 // The language filters need the catalogue data. The desktop app keeps it in
 // .data, but Android has no AllAnime server of its own, so the latest known
 // index and counts travel with the APK under ordinary (non-hidden) names.

@@ -869,7 +869,7 @@ html.fs-video #app > div { animation: none; transform: none; }
 .acct-menu [role="menuitem"] .i { width: 16px; height: 16px; }
 .acct-menu [role="menuitem"]:hover { background: var(--bg-2); color: var(--text); }
 
-/* ---------- modal (AniList setup) ---------- */
+/* ---------- modal (account provider chooser) ---------- */
 /* A dialog is a little page of its own: while it is open the page behind it
    stands still. Without this the focus moving inside the panel drags the
    page along with it - and on a television, pressing up at the top of the
@@ -890,6 +890,40 @@ html.dlg-open, html.dlg-open body { overflow: hidden; }
 .modal-err { color: var(--live) !important; font-size: 13px !important; margin: -4px 0 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .modal .fine { font-size: 12.5px; margin: -4px 0 0; }
+.provider-choices { display: grid; gap: 10px; }
+.provider-choice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--bg-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-ui) var(--ease-soft), background var(--dur-ui) var(--ease-soft), transform var(--dur-ui) var(--ease-out);
+}
+.provider-choice:hover, .provider-choice:focus-visible { border-color: var(--accent); background: var(--bg); transform: translateY(-1px); }
+.provider-choice:disabled { opacity: .55; cursor: wait; transform: none; }
+.provider-choice > span:last-child { display: grid; gap: 3px; min-width: 0; }
+.provider-choice b { font-size: 15px; }
+.provider-choice small { color: var(--text-3); font-size: 12.5px; }
+.provider-mark {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+}
+.provider-anilist { background: #02a9ff; }
+.provider-mal { background: #2e51a2; }
 
 /* ---------- settings ---------- */
 .settings-modal { width: min(560px, calc(100vw - 32px)); max-height: min(86vh, 720px); overflow: hidden; }

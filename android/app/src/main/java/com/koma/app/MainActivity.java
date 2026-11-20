@@ -2,8 +2,10 @@ package com.koma.app;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.media.AudioManager;
+import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -20,8 +22,10 @@ import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
 import com.janeasystems.rn_nodejs_mobile.RNNodeJsMobileModule;
@@ -48,6 +52,8 @@ public class MainActivity extends Activity {
 
   private WebView webView;
   private FrameLayout rootLayout;
+  private String pendingAuthCallback;
+  private OAuthCallbackServer oauthCallbackServer;
   private VideoChromeClient videoChromeClient;
   private UpdateManager updateManager;
   private UpdatePrompt updatePrompt;
@@ -96,6 +102,10 @@ public class MainActivity extends Activity {
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
+    Uri initialIntent = getIntent() == null ? null : getIntent().getData();
+    if (initialIntent != null && BuildConfig.APPLICATION_ID.equals(initialIntent.getScheme())) {
+      pendingAuthCallback = initialIntent.toString();
+    }
 
     // Anything that kills the process writes its trace first.
     final Thread.UncaughtExceptionHandler prior = Thread.getDefaultUncaughtExceptionHandler();
@@ -182,6 +192,7 @@ public class MainActivity extends Activity {
     s.setBuiltInZoomControls(false);
     s.setDisplayZoomControls(false);
     videoChromeClient = new VideoChromeClient();
+    webView.setWebViewClient(new AccountWebViewClient());
     webView.setWebChromeClient(videoChromeClient);
     // The page reads the app's version through this - the footer then says
     // "Koma 1.7.17 - Up to date" instead of presenting the app as a web page.
@@ -237,7 +248,10 @@ public class MainActivity extends Activity {
                 trace(MainActivity.this, "loading the site in the webview");
                 // The television app opens the site in television mode, so the
                 // layout and the remote's navigation are the television's.
-                webView.loadUrl("http://127.0.0.1:" + p + (BuildConfig.IS_TV ? "/?tv=1" : "/"));
+                String callback = pendingAuthCallback;
+                pendingAuthCallback = null;
+                if (callback != null) handleAuthCallback(callback);
+                else webView.loadUrl("http://127.0.0.1:" + p + (BuildConfig.IS_TV ? "/?tv=1" : "/"));
               }
             });
             return;
@@ -301,8 +315,13 @@ public class MainActivity extends Activity {
     updatePrompt.show(state);
   }
 
+  private boolean activityGone() {
+    return isFinishing() || isDestroyed();
+  }
+
   /** Validates once more, then hands the APK to Android's own installer. */
   private void installUpdate(File apk, String version) {
+    if (activityGone()) return;
     UpdateInstaller.Result result = UpdateInstaller.install(this, apk, version);
     if (result.needsInstallPermission) {
       updatePrompt.setPermissionMessage(result.error);
@@ -564,6 +583,86 @@ public class MainActivity extends Activity {
     return true;
   }
 
+  private void openAccountAuth(String url) {
+    try {
+      stopOAuthCallbackServer();
+      oauthCallbackServer = OAuthCallbackServer.start(4000);
+      if (oauthCallbackServer == null) {
+        webView.evaluateJavascript(
+          "window.dispatchEvent(new CustomEvent('koma:sync-error',{detail:'The sign-in callback could not start. Close any app using port 4000 and try again.'}))",
+          null);
+        return;
+      }
+
+      Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+      intent.addCategory(Intent.CATEGORY_BROWSABLE);
+      startActivity(intent);
+    } catch (Exception error) {
+      stopOAuthCallbackServer();
+      traceThrowable(this, "could not open account sign-in", error);
+    }
+  }
+
+  private void stopOAuthCallbackServer() {
+    if (oauthCallbackServer != null) {
+      oauthCallbackServer.stop();
+      oauthCallbackServer = null;
+    }
+  }
+
+  private void handleAuthCallback(String value) {
+    if (activityGone()) return;
+    stopOAuthCallbackServer();
+    Uri uri;
+    try { uri = Uri.parse(value); }
+    catch (Exception error) { traceThrowable(this, "bad account callback", error); return; }
+    if (!BuildConfig.APPLICATION_ID.equals(uri.getScheme()) || !"auth".equals(uri.getHost())) return;
+    String name = uri.getPathSegments().isEmpty() ? "" : uri.getPathSegments().get(0);
+    if (!"anilist".equals(name) && !"myanimelist".equals(name)) return;
+
+    int port = sitePort();
+    if (port <= 0) {
+      pendingAuthCallback = value;
+      return;
+    }
+    StringBuilder query = new StringBuilder();
+    if (BuildConfig.IS_TV) query.append("tv=1");
+    String callbackQuery = uri.getEncodedQuery();
+    if (callbackQuery != null && !callbackQuery.isEmpty()) {
+      if (query.length() > 0) query.append('&');
+      query.append(callbackQuery);
+    }
+    StringBuilder local = new StringBuilder("http://127.0.0.1:").append(port).append("/auth/").append(name);
+    if (query.length() > 0) local.append('?').append(query);
+    String fragment = uri.getEncodedFragment();
+    if (fragment != null && !fragment.isEmpty()) local.append('#').append(fragment);
+    webView.loadUrl(local.toString());
+  }
+
+  @Override
+  protected void onNewIntent(Intent intent) {
+    super.onNewIntent(intent);
+    setIntent(intent);
+    Uri uri = intent == null ? null : intent.getData();
+    if (uri != null && BuildConfig.APPLICATION_ID.equals(uri.getScheme())) handleAuthCallback(uri.toString());
+  }
+
+  private class AccountWebViewClient extends WebViewClient {
+    @Override
+    public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+      String url = request.getUrl() == null ? "" : request.getUrl().toString();
+      if (url.startsWith(BuildConfig.APPLICATION_ID + "://auth/")) {
+        handleAuthCallback(url);
+        return true;
+      }
+      if (url.startsWith("https://anilist.co/api/v2/oauth/authorize")
+          || url.startsWith("https://myanimelist.net/v1/oauth2/authorize")) {
+        openAccountAuth(url);
+        return true;
+      }
+      return false;
+    }
+  }
   /** Fullscreen video: the player's own button hands the view over here. */
   private class VideoChromeClient extends WebChromeClient {    @Override
     public void onShowCustomView(View view, CustomViewCallback callback) {
@@ -627,6 +726,7 @@ public class MainActivity extends Activity {
   @Override
   protected void onDestroy() {
     // The Node servers keep running with the app process; the WebView goes.
+    stopOAuthCallbackServer();
     if (updateManager != null) updateManager.shutdown();
     if (roomMulticastLock != null && roomMulticastLock.isHeld()) {
       try { roomMulticastLock.release(); } catch (Exception ignored) { }

@@ -61,7 +61,7 @@ const tv = isTv();
 if (tv) initTv();
 import { initScrollbar } from './scrollbar.js';
 import { initPreviews, previewsOn } from './preview.js';
-import { account, clientId, finishLogin, initAutoSync, loginUrl, REDIRECT, setClientId, signOut, syncNow, syncPending } from './anilist.js';
+import { account, activeProvider, activeProviderLabel, finishLogin, initAutoSync, profileUrl, signOut, startLogin, syncNow, syncPending } from './account.js';
 import { initRoomUI, joinSession, room, roomUrl, waitForState } from './room.js';
 import { initLinks } from './links.js';
 
@@ -86,7 +86,7 @@ const routes = [
   [/^\/schedule\/?$/, schedule],
   [/^\/list\/?$/, list],
   [/^\/stats\/?$/, stats],
-  [/^\/auth\/anilist\/?$/, authAniList],
+  [/^\/auth\/(anilist|myanimelist)\/?$/, authAccount],
   [/^\/join\/?$/, joinView],
 ];
 
@@ -123,48 +123,63 @@ addEventListener('koma:room-goto', e => {
   go(url);
 });
 
-/* ---------- AniList account ---------- */
-// AniList sends you back to /auth/anilist#access_token=…; finish the sign-in, then show My list.
-async function authAniList(root) {
-  root.innerHTML = '<div class="lost"><h1>Signing you in…</h1><p>Getting your AniList list.</p></div>';
-  const hash = location.hash;
-  history.replaceState(null, '', '/auth/anilist'); // don't leave the token in the address bar
-  const user = await finishLogin(hash);
-  toast(`Signed in as ${user.name} · your AniList list is synced`);
-  go('/list', { replace: true });
+/* ---------- account ---------- */
+// The provider sends the callback to /auth/anilist or /auth/myanimelist.
+// Finish the exchange, then show the synchronized library.
+async function authAccount(root, { params }) {
+  const name = params[0];
+  const label = name === 'myanimelist' ? 'MyAnimeList' : 'AniList';
+  root.innerHTML = `<div class="lost"><h1>Signing you in…</h1><p>Getting your ${label} list.</p></div>`;
+  try {
+    const result = await finishLogin(name);
+    const user = result.user;
+    history.replaceState(null, '', `/auth/${name}`); // don't leave the code or token in the address bar
+    toast(result.syncError
+      ? `Signed in as ${user.name} · the first sync will retry`
+      : `Signed in as ${user.name} · your ${label} list is synced`);
+    go('/list', { replace: true });
+  } catch (err) {
+    history.replaceState(null, '', `/auth/${name}`);
+    root.innerHTML = `<div class="lost"><h1>Sign-in didn’t finish</h1><p>${esc(err.message)}</p><p><a class="btn btn-ghost btn-sm" href="/">Back to Koma</a></p></div>`;
+  }
 }
 
-function startLogin() {
-  if (clientId()) { location.href = loginUrl(); return; }
-  const dlg = $('#al-setup');
-  $('#al-redirect').textContent = REDIRECT;
-  $('#al-err').hidden = true;
+function showAccountChooser() {
+  const dlg = $('#account-setup');
+  $('#auth-err').hidden = true;
   dlg.showModal();
 }
-$('[data-copy-redirect]').addEventListener('click', () => navigator.clipboard?.writeText(REDIRECT).then(() => toast('Redirect URL copied')));
-$('#al-setup').addEventListener('close', () => {
-  const dlg = $('#al-setup');
-  if (dlg.returnValue !== 'ok') return;
-  const id = $('#al-client').value.trim();
-  if (!/^\d+$/.test(id)) { $('#al-err').textContent = 'The Client ID is the number AniList shows for your client.'; $('#al-err').hidden = false; dlg.showModal(); return; }
-  setClientId(id);
-  location.href = loginUrl();
+$('#account-setup').addEventListener('click', async e => {
+  const button = e.target.closest('[data-provider]');
+  if (!button) return;
+  const error = $('#auth-err');
+  error.hidden = true;
+  for (const item of $('#account-setup').querySelectorAll('[data-provider]')) item.disabled = true;
+  try {
+    await startLogin(button.dataset.provider);
+  } catch (err) {
+    error.textContent = err.message;
+    error.hidden = false;
+    for (const item of $('#account-setup').querySelectorAll('[data-provider]')) item.disabled = false;
+  }
 });
 
 function paintAccount() {
   const user = account();
+  const label = activeProviderLabel();
   const box = $('#acct');
   box.innerHTML = user
     ? `<button class="acct-btn" type="button" aria-haspopup="menu" aria-expanded="false" title="${esc(user.name)}">
         ${user.avatar ? `<img src="${esc(user.avatar)}" alt="">` : `<span>${esc(user.name[0] || '?')}</span>`}</button>
        <div class="acct-menu" role="menu" hidden>
-         <p>Signed in to AniList as<b>${esc(user.name)}</b></p>
+         <p>Signed in to ${esc(label)} as<b>${esc(user.name)}</b></p>
          <p class="sync-pending" hidden></p>
          <button type="button" role="menuitem" data-acct="sync">${icon('reload')}Sync now</button>
-         <a role="menuitem" href="https://anilist.co/user/${encodeURIComponent(user.name)}/animelist" target="_blank" rel="noopener">${icon('external')}My AniList</a>
+         <a role="menuitem" href="${esc(profileUrl(user))}" target="_blank" rel="noopener">${icon('external')}My ${esc(label)}</a>
+         <button type="button" role="menuitem" data-acct="switch">${icon('users')}Switch account</button>
          <button type="button" role="menuitem" data-acct="out">${icon('x')}Sign out</button>
        </div>`
-    : `<button class="btn btn-ghost btn-sm acct-in" type="button" data-acct="in">Sign in with AniList</button>`;
+    : `<button class="btn btn-ghost btn-sm acct-in" type="button" data-acct="in">Sign in</button>`;
 }
 $('#acct').addEventListener('click', async e => {
   const btn = e.target.closest('.acct-btn');
@@ -172,17 +187,21 @@ $('#acct').addEventListener('click', async e => {
   if (btn) { menu.hidden = !menu.hidden; btn.setAttribute('aria-expanded', !menu.hidden); return; }
   const act = e.target.closest('[data-acct]')?.dataset.acct;
   if (menu) menu.hidden = true;
-  if (act === 'in') startLogin();
-  else if (act === 'out') { signOut(); toast('Signed out of AniList. Your list stays in Koma.'); }
+  if (act === 'in' || act === 'switch') showAccountChooser();
+  else if (act === 'out') {
+    const label = activeProviderLabel();
+    signOut();
+    toast(`Signed out of ${label || 'the account'}. Your list stays in Koma.`);
+  }
   else if (act === 'sync') {
-    toast('Syncing with AniList…');
-    syncNow().then(() => toast('Synced with AniList')).catch(err => toast(err.message));
+    toast(`Syncing with ${activeProviderLabel()}…`);
+    syncNow().then(() => toast(`Synced with ${activeProviderLabel()}`)).catch(err => toast(err.message));
   }
   if (act && $('.acct-btn')) paintSyncLine(); // the pending count may be stale from the last paint
 });
 document.addEventListener('click', e => { if (!e.target.closest('#acct')) { const m = $('.acct-menu'); if (m) m.hidden = true; } });
 addEventListener('koma:account', paintAccount);
-addEventListener('koma:sync-error', e => toast(`AniList: ${e.detail}`));
+addEventListener('koma:sync-error', e => toast(`${activeProviderLabel() || 'Account'}: ${e.detail}`));
 function paintSyncLine() {
   const el = $('#acct .sync-pending');
   if (!el) return;
@@ -193,7 +212,7 @@ function paintSyncLine() {
 addEventListener('koma:sync', paintSyncLine);
 paintAccount();
 paintSyncLine();
-syncNow().catch(err => toast(`AniList: ${err.message}`)); // pull your list every launch
+syncNow().catch(err => toast(`${activeProviderLabel() || 'Account'}: ${err.message}`)); // pull your list every launch
 initAutoSync(); // mid-session pulls + pending-push flushes
 const html = document.documentElement;
 const header = $('#top');

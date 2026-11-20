@@ -14,8 +14,9 @@ const PORT = 4000;
 // The streaming server's port. It is 3000 unless something else already sits
 // there, in which case it moves (the site is told where it went).
 let streamPort = 3000;
-// localhost (not 127.0.0.1): it's the address the AniList sign-in sends you back to, and it keeps
-// the same saved list/progress as the site opened in a normal browser.
+// localhost (not 127.0.0.1): it is the exact OAuth callback URI registered with
+// AniList and MyAnimeList, and it keeps the same saved list/progress as the
+// site opened in a normal browser.
 const URL_HOME = `http://localhost:${PORT}/`;
 const PROBE = `http://127.0.0.1:${PORT}/`;
 const IS_WIN = process.platform === 'win32';
@@ -153,6 +154,8 @@ const STATE = () => path.join(app.getPath('userData'), 'window.json');
 const readState = () => { try { return JSON.parse(fs.readFileSync(STATE(), 'utf8')); } catch { return {}; } };
 
 let win;
+let accountAuthWindow = null;
+let pendingProtocolUrl = '';
 function createWindow() {
   const s = readState();
   win = new BrowserWindow({
@@ -201,14 +204,32 @@ function createWindow() {
     // Only real external links (Crunchyroll, AniList, …) reach the browser. Same-origin
     // opens — middle-clicked cards, dragged thumbnails — are denied outright: the app is
     // the destination, never a launcher for itself.
+    if (isAccountAuthUrl(url)) {
+      signInWindow(url);
+      return { action: 'deny' };
+    }
     if (/^https?:/.test(url) && external(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (e, url) => {
+    if (isAccountAuthUrl(url)) {
+      e.preventDefault();
+      signInWindow(url);
+      return;
+    }
     if (!external(url)) return;
     e.preventDefault();
-    if (url.startsWith('https://anilist.co/api/v2/oauth/authorize')) signInWindow(url);
-    else shell.openExternal(url);
+    shell.openExternal(url);
+  });
+  win.webContents.on('will-redirect', (e, url) => {
+    if (isAccountAuthUrl(url)) {
+      e.preventDefault();
+      signInWindow(url);
+      return;
+    }
+    if (!external(url)) return;
+    e.preventDefault();
+    shell.openExternal(url);
   });
 
   // Header styling only the app needs: always solid (it carries the window buttons) and draggable.
@@ -252,18 +273,56 @@ function createWindow() {
   return win;
 }
 
-/** AniList's sign-in page in a child window; when AniList sends you back, the token goes to the main window. */
+function isAccountAuthUrl(url) {
+  return url.startsWith('https://anilist.co/api/v2/oauth/authorize')
+    || url.startsWith('https://myanimelist.net/v1/oauth2/authorize');
+}
+
+function accountCallbackUrl(value) {
+  try {
+    const parsed = new URL(value);
+    let name = '';
+    if (parsed.protocol === 'koma:' && parsed.hostname === 'auth') {
+      name = parsed.pathname.split('/').filter(Boolean)[0];
+    } else if (parsed.protocol === 'http:' && parsed.hostname === 'localhost'
+        && parsed.port === String(PORT)) {
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      if (parts.length === 2 && parts[0] === 'auth') name = parts[1];
+    } else {
+      return '';
+    }
+    if (name !== 'anilist' && name !== 'myanimelist') return '';
+    return `${URL_HOME}auth/${name}${parsed.search}${parsed.hash}`;
+  } catch { return ''; }
+}
+
+/** The provider's sign-in page in a child window; its callback returns to the main window. */
 function signInWindow(url) {
-  const auth = new BrowserWindow({ parent: win, modal: true, width: 520, height: 760, title: 'Sign in with AniList', backgroundColor: '#0B1622', autoHideMenuBar: true, webPreferences: { contextIsolation: true, sandbox: true } });
+  const provider = url.startsWith('https://myanimelist.net/') ? 'MyAnimeList' : 'AniList';
+  const auth = new BrowserWindow({ parent: win, modal: true, width: 520, height: 760, title: `Sign in with ${provider}`, backgroundColor: '#0B1622', autoHideMenuBar: true, webPreferences: { contextIsolation: true, sandbox: true } });
+  accountAuthWindow = auth;
+  auth.on('closed', () => { if (accountAuthWindow === auth) accountAuthWindow = null; });
+  let handled = false;
   const back = (e, to) => {
-    if (!to.startsWith(`${URL_HOME}auth/anilist`)) return;
+    if (handled) return;
+    const callback = accountCallbackUrl(to);
+    if (!callback) return;
+    handled = true;
     e.preventDefault();
-    win.loadURL(to);
+    win.loadURL(callback);
     auth.close();
+    setImmediate(() => { if (win && !win.isDestroyed()) win.focus(); });
   };
   auth.webContents.on('will-redirect', back);
   auth.webContents.on('will-navigate', back);
-  auth.webContents.setWindowOpenHandler(({ url: u }) => { shell.openExternal(u); return { action: 'deny' }; });
+  auth.webContents.setWindowOpenHandler(({ url: u }) => {
+    if (isAccountAuthUrl(u)) {
+      signInWindow(u);
+      return { action: 'deny' };
+    }
+    shell.openExternal(u);
+    return { action: 'deny' };
+  });
   auth.loadURL(url);
 }
 
@@ -904,10 +963,32 @@ function pendingUpdate() {
   return null;
 }
 
+/** Handles koma://auth/... when Windows sends the OAuth callback to the app. */
+function handleAccountProtocol(value) {
+  const callback = accountCallbackUrl(value);
+  if (!callback) return false;
+  if (accountAuthWindow && !accountAuthWindow.isDestroyed()) accountAuthWindow.close();
+  if (win && !win.isDestroyed()) {
+    showKoma();
+    win.loadURL(callback);
+  } else {
+    pendingProtocolUrl = callback;
+  }
+  return true;
+}
+
 /* ---------- app lifecycle ---------- */
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on('second-instance', () => { if (win) { showKoma(); if (win.isMinimized()) win.restore(); win.focus(); } });
+  if (process.defaultApp) app.setAsDefaultProtocolClient('koma', process.execPath, [path.resolve(process.argv[1])]);
+  else app.setAsDefaultProtocolClient('koma');
+  const protocolUrl = argv => argv.find(value => String(value).startsWith('koma://')) || '';
+  pendingProtocolUrl = accountCallbackUrl(protocolUrl(process.argv));
+  app.on('second-instance', (_event, argv) => {
+    const callback = protocolUrl(argv);
+    if (callback) handleAccountProtocol(callback);
+    if (win) { showKoma(); if (win.isMinimized()) win.restore(); win.focus(); }
+  });
   app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required'); // the next episode can start by itself
   if (IS_WIN) app.setAppUserModelId('Koma');
   Menu.setApplicationMenu(null);
@@ -938,7 +1019,10 @@ else {
       return;
     }
     status('Almost ready…');
-    if (await waitForKoma()) win.loadURL(URL_HOME);
+    if (await waitForKoma()) {
+      win.loadURL(pendingProtocolUrl || URL_HOME);
+      pendingProtocolUrl = '';
+    }
     else status(`Koma didn't start. Check ${path.join(LOGS, 'koma.log')}`);
     if (BUNDLED) { // packaged builds look for a newer GitHub release; dev runs skip this
       fs.mkdirSync(LOGS, { recursive: true });
