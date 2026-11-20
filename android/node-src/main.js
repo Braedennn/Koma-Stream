@@ -48,6 +48,12 @@ try {
   // file, which the APK cannot carry, so the value is set here directly).
   process.env.KOMA_ANIVAULT_KEY = env.match(/^ANIVAULT_API_KEY=(.+)$/m)?.[1]?.trim() || '';
   process.env.ANIVAULT_API_KEY = process.env.KOMA_ANIVAULT_KEY;
+  // The media routes are the browser's own: keyless, and answered for the
+  // player's origin. The streaming server would otherwise fall back to its
+  // upstream allowlist and refuse every request the WebView makes for a
+  // playlist or a segment, so the wildcard in the env is put in place here.
+  const allowed = env.match(/^ALLOWED_ORIGINS=(.+)$/m)?.[1]?.trim();
+  if (allowed) process.env.ALLOWED_ORIGINS = allowed;
   process.env.KOMA_DATA_DIR = join(root, '..', 'data');
   mkdirSync(process.env.KOMA_DATA_DIR, { recursive: true });
 } catch { /* the key file ships with the app; a missing one fails loudly later */ }
