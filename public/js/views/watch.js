@@ -51,7 +51,10 @@ export async function watch(root, { params: [id], query, alive }) {
   const list = episodeIndex(a, schedule, src?.episodes || [], src?.offset || 0);
   let aired = list.filter(e => !e.later);
   let yt = ytId(a);
-  let ep = list.find(e => e.n === asked) || aired.find(e => !watchedSet(a.id).has(e.n)) || aired.at(-1) || list[0];
+  // Where an arrival starts: the episode asked for, the next one you have not
+  // watched, and then the first one. A series you have been through starts
+  // again from its beginning, not from its end.
+  let ep = list.find(e => e.n === asked) || aired.find(e => !watchedSet(a.id).has(e.n)) || aired[0] || list[0];
   let type = wantType;
   let mode = (query.get('mode') === 'trailer' || !ep) && yt ? 'trailer' : 'episode';
   let source = 'anikoto';
@@ -200,6 +203,12 @@ export async function watch(root, { params: [id], query, alive }) {
     onRefresh: () => loadStream({ keepTime: true, fresh: true }),
     onProgress: (t, dur) => {
       if (mode !== 'episode' || !playable(ep)) return;
+      // The playhead belongs to the episode the player is actually showing.
+      // While a new episode loads, the previous one is still on screen for a
+      // moment, and its position must not be written under the new episode's
+      // number — that is what made a fresh episode offer to "continue" from
+      // wherever the last one had got to.
+      if (player && player.state.ep !== ep.n) return;
       if (t > 10 && Number.isFinite(dur) && dur - t > 25) writeProgress(a.id, { ep: ep.n, t, dur, at: Date.now() });
       presenceProgress(t, dur); // the profile's progress bar
       // Resolve the next episode in the last couple of minutes so autoplay starts instantly.
@@ -398,6 +407,13 @@ export async function watch(root, { params: [id], query, alive }) {
       hasPrev: Boolean(prevTarget()),
     });
     p.setAudio({ type, canDub: dubAllowed(), counts: audio });
+    // On a television, watching is the whole screen. The page and its band
+    // come back the moment the viewer asks for them, so there is nothing to
+    // dismiss first.
+    if (isTv() && !p.isFullscreen) {
+      const start = () => { p.toggleFullscreen(); p.video.removeEventListener('playing', start); };
+      p.video.addEventListener('playing', start);
+    }
   }
 
   function gotoEpisode(n) {

@@ -110,18 +110,14 @@ html.tv .scroll-rail { display: none !important; }
 }
 .tv-rail-item .i { width: 27px; height: 27px; }
 .tv-rail-item:hover { color: var(--text); background: var(--bg-2); }
-.tv-rail-item[aria-current="page"] { color: var(--text); background: var(--bg-2); }
-.tv-rail-item[aria-current="page"]::before {
-  content: "";
-  position: absolute;
-  left: -12px;
-  top: 50%;
-  width: 4px;
-  height: 30px;
-  margin-top: -15px;
-  border-radius: 0 4px 4px 0;
+/* The place you are is filled in, not marked with a stripe: a television app
+   says where you are with a pill, the way a set-top box does. */
+.tv-rail-item[aria-current="page"] {
+  color: var(--bg);
   background: var(--text);
+  box-shadow: 0 10px 24px -14px rgba(0, 0, 0, .9);
 }
+.tv-rail-item[aria-current="page"]::before { content: none; }
 .tv-rail-gap { flex: 1 1 auto; min-height: 16px; }
 
 /* The focus on the rail does not shout: it fills the item and lifts it a
@@ -131,6 +127,52 @@ html.tv .tv-rail-item:is(:focus, .tv-focus) {
   background: var(--bg-3);
   color: var(--text);
   transform: translateX(3px);
+}
+html.tv .tv-rail-item[aria-current="page"]:is(:focus, .tv-focus) {
+  background: var(--text);
+  color: var(--bg);
+}
+
+/* ---------- the cards on a television ---------- */
+/* The art is the point. On a website a poster sits above its caption; on a
+   television the caption belongs to the picture, the way a title card does.
+   A gradient carries the type and nothing else changes. */
+html.tv .card { position: relative; }
+html.tv .poster-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  background: linear-gradient(0deg, rgba(5, 6, 10, .92) 0%, rgba(5, 6, 10, .4) 26%, transparent 54%);
+  pointer-events: none;
+}
+html.tv .card-title {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  margin: 0;
+  padding: 13px 15px 34px;
+  font-size: clamp(16px, 1.35vw, 21px);
+  line-height: 1.22;
+  letter-spacing: -.018em;
+  -webkit-line-clamp: 2;
+  text-shadow: 0 1px 14px rgba(0, 0, 0, .95);
+}
+/* The year and the episode count sit under the name, still on the picture. */
+html.tv .card-meta {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  margin: 0;
+  padding: 0 15px 11px;
+  color: rgba(255, 255, 255, .7);
+  font-size: 13px;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, .95);
 }
 
 /* ---------- the focus ---------- */
