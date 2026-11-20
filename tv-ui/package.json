@@ -1,0 +1,14 @@
+{
+  "name": "koma-tv-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A high-end television UI study for Koma: one immersive screen, ten-foot type, remote-driven focus. Not the shipping app.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "sample": "node tools/fetch-sample.mjs"
+  },
+  "devDependencies": {
+    "electron": "44.7.0"
+  }
+}
