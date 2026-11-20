@@ -72,6 +72,12 @@ final class UpdatePrompt {
     if (dialog != null) dialog.dismiss();
   }
 
+  /** Closes the prompt because there is nothing left to offer. */
+  void dismiss() {
+    dismissedByAction = true;
+    if (dialog != null) dialog.dismiss();
+  }
+
   void dismissAfterInstall() {
     dismissedByAction = true;
     if (dialog != null) dialog.dismiss();
@@ -153,7 +159,8 @@ final class UpdatePrompt {
       if (state == null) return;
       if (state.kind == UpdateManager.Kind.READY) {
         callbacks.onUpdateNow(state.apk, state.version);
-      } else if (state.kind == UpdateManager.Kind.FAILED) {
+      } else if (state.kind == UpdateManager.Kind.FAILED
+          || state.kind == UpdateManager.Kind.CHECK_FAILED) {
         callbacks.onRetry();
       }
     });
@@ -222,6 +229,10 @@ final class UpdatePrompt {
       progress.setIndeterminate(false);
       progress.setProgress(0);
       status = state.error.isEmpty() ? "The update could not be downloaded." : state.error;
+    } else if (state.kind == UpdateManager.Kind.CHECK_FAILED) {
+      progress.setIndeterminate(false);
+      progress.setProgress(0);
+      status = state.error.isEmpty() ? "The update could not be checked." : state.error;
     } else {
       progress.setIndeterminate(false);
       progress.setProgress(0);
@@ -237,7 +248,8 @@ final class UpdatePrompt {
     if (state.kind == UpdateManager.Kind.READY) {
       updateButton.setText("Update now");
       updateButton.setEnabled(true);
-    } else if (state.kind == UpdateManager.Kind.FAILED) {
+    } else if (state.kind == UpdateManager.Kind.FAILED
+        || state.kind == UpdateManager.Kind.CHECK_FAILED) {
       updateButton.setText("Try again");
       updateButton.setEnabled(true);
     } else {
@@ -274,7 +286,9 @@ final class UpdatePrompt {
 
   private void requestFocus() {
     if (!tv || updateButton == null || dialog == null) return;
-    View target = state != null && state.kind == UpdateManager.Kind.READY
+    View target = state != null && (state.kind == UpdateManager.Kind.READY
+        || state.kind == UpdateManager.Kind.FAILED
+        || state.kind == UpdateManager.Kind.CHECK_FAILED)
         ? updateButton : laterButton;
     target.post(() -> {
       Window window = dialog.getWindow();

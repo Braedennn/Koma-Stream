@@ -17,6 +17,7 @@ import java.security.MessageDigest;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * Checks GitHub Releases, downloads the APK for this product flavor and keeps
@@ -32,7 +33,7 @@ final class UpdateManager {
   private static final int CONNECT_TIMEOUT_MS = 15000;
   private static final int READ_TIMEOUT_MS = 60000;
 
-  enum Kind { IDLE, CHECKING, DOWNLOADING, READY, FAILED, UP_TO_DATE }
+  enum Kind { IDLE, CHECKING, DOWNLOADING, READY, FAILED, CHECK_FAILED, UP_TO_DATE }
 
   static final class State {
     final Kind kind;
@@ -68,6 +69,21 @@ final class UpdateManager {
     void onUpdateState(State state);
   }
 
+  /** Release metadata that passed the check, ready for the download phase. */
+  private static final class ReleasePlan {
+    final String version;
+    final String notes;
+    final UpdateAsset asset;
+    final String flavor;
+
+    ReleasePlan(String version, String notes, UpdateAsset asset, String flavor) {
+      this.version = version;
+      this.notes = notes;
+      this.asset = asset;
+      this.flavor = flavor;
+    }
+  }
+
   private final Context context;
   private final File updateDir;
   private final SharedPreferences preferences;
@@ -79,6 +95,8 @@ final class UpdateManager {
   private Listener listener;
   private boolean running;
   private boolean forcePrompt;
+  private boolean closed;
+  private volatile HttpURLConnection activeConnection;
 
   UpdateManager(Context context, String releaseApiOverride) {
     this.context = context.getApplicationContext();
@@ -90,7 +108,13 @@ final class UpdateManager {
   }
 
   void setListener(Listener listener) {
-    this.listener = listener;
+    synchronized (this) {
+      if (closed) {
+        this.listener = null;
+        return;
+      }
+      this.listener = listener;
+    }
   }
 
   State state() {
@@ -103,32 +127,58 @@ final class UpdateManager {
 
   void check(boolean force) {
     synchronized (this) {
-      if (running) return;
+      if (closed || running) return;
       long now = System.currentTimeMillis();
       if (!force && now - preferences.getLong("lastCheck", 0L) < CHECK_INTERVAL_MS) return;
       running = true;
-      preferences.edit().putLong("lastCheck", now).apply();
     }
-    publish(new State(Kind.CHECKING, "", "", "", 0, 0, null));
-    worker.execute(() -> {
-      try {
-        checkRelease();
-      } catch (Exception e) {
-        MainActivity.traceThrowable(context, "update check failed", e);
-        publish(new State(Kind.FAILED, "", "", message(e), 0, 0, null));
-      } finally {
-        synchronized (UpdateManager.this) {
-          running = false;
+    State previous = state;
+    publish(new State(Kind.CHECKING, previous.version, previous.notes, "", 0, 0, null));
+    try {
+      worker.execute(() -> {
+        try {
+          ReleasePlan plan;
+          try {
+            plan = checkRelease();
+          } catch (Exception e) {
+            MainActivity.traceThrowable(context, "update check failed", e);
+            State current = state;
+            publish(new State(Kind.CHECK_FAILED, current.version, current.notes,
+                checkMessage(e), 0, 0, null));
+            return;
+          }
+
+          // The release metadata was checked successfully. A later download
+          // failure must not make the app ask GitHub again on every launch.
+          preferences.edit().putLong("lastCheck", System.currentTimeMillis()).apply();
+          if (plan == null) return;
+
+          try {
+            prepareAndDownload(plan);
+          } catch (Exception e) {
+            MainActivity.traceThrowable(context, "update download failed", e);
+            publish(new State(Kind.FAILED, plan.version, plan.notes,
+                downloadMessage(e), 0, 0, null));
+          }
+        } finally {
+          synchronized (UpdateManager.this) {
+            running = false;
+          }
         }
+      });
+    } catch (RejectedExecutionException ignored) {
+      synchronized (this) {
+        running = false;
       }
-    });
+    }
   }
 
   /** Shows the cached update, or starts a check when there is nothing cached yet. */
   void requestPrompt() {
     synchronized (this) {
+      if (closed) return;
       forcePrompt = true;
-        }
+    }
     State current = state;
     if (current.kind == Kind.READY || current.kind == Kind.DOWNLOADING) {
       publish(current);
@@ -139,6 +189,9 @@ final class UpdateManager {
 
   /** Keeps the downloaded APK but does not ask again about this release for a day. */
   void defer() {
+    synchronized (this) {
+      if (closed) return;
+    }
     State current = state;
     if (current.version.isEmpty()) return;
     preferences.edit()
@@ -149,6 +202,7 @@ final class UpdateManager {
 
   void retry() {
     synchronized (this) {
+      if (closed) return;
       forcePrompt = true;
       preferences.edit().remove("lastCheck").apply();
     }
@@ -171,16 +225,26 @@ final class UpdateManager {
   }
 
   void shutdown() {
+    final HttpURLConnection connection;
+    synchronized (this) {
+      if (closed) return;
+      closed = true;
+      listener = null;
+      connection = activeConnection;
+    }
+    if (connection != null) connection.disconnect();
     worker.shutdownNow();
   }
 
-  private void checkRelease() throws Exception {
+  /** Fetches and validates release metadata. The APK is downloaded separately. */
+  private ReleasePlan checkRelease() throws Exception {
     String json = fetch(releaseApi);
     GitHubRelease release = GitHubRelease.fromJson(json);
     String installed = installedVersion();
     if (!UpdateVersion.isNewer(release.version, installed)) {
+      evictStaleCache(null);
       publish(new State(Kind.UP_TO_DATE, release.version, release.notes, "", 0, 0, null));
-      return;
+      return null;
     }
 
     String flavor = BuildConfig.IS_TV ? "tv" : "phone";
@@ -188,32 +252,51 @@ final class UpdateManager {
     if (asset == null) {
       // A desktop-only release is still a valid release; this flavor simply has
       // nothing to install yet.
+      evictStaleCache(null);
       publish(new State(Kind.UP_TO_DATE, release.version, release.notes, "", 0, 0, null));
-      return;
+      return null;
+    }
+    if (!asset.hasSha256()) {
+      throw new IllegalStateException("The release APK is missing a valid SHA-256 checksum.");
     }
 
     String deferred = preferences.getString("deferredVersion", "");
     if (!release.version.equals(deferred)) {
       preferences.edit().remove("deferredVersion").remove("deferredAt").apply();
     }
+    return new ReleasePlan(release.version, release.notes, asset, flavor);
+  }
 
-    File cached = cachedFile(release.version, flavor);
-    if (cached.isFile() && matchesAsset(cached, asset)
-        && ApkValidator.validate(context, cached, context.getPackageName(), release.version).valid) {
-      publish(new State(Kind.READY, release.version, release.notes, "", 0, 0, cached));
+  /** Uses a verified cached APK or downloads and validates a fresh one. */
+  private void prepareAndDownload(ReleasePlan plan) throws Exception {
+    File cached = cachedFile(plan.version, plan.flavor);
+    evictStaleCache(cached);
+    if (cached.isFile() && matchesAsset(cached, plan.asset)
+        && ApkValidator.validate(context, cached, context.getPackageName(), plan.version).valid) {
+      publish(new State(Kind.READY, plan.version, plan.notes, "", 0, 0, cached));
       return;
     }
     if (cached.exists() && !cached.delete()) {
       throw new IllegalStateException("The old update could not be replaced.");
     }
 
-    publish(new State(Kind.DOWNLOADING, release.version, release.notes, "", 0, asset.size, null));
-    download(asset, release.version, release.notes, flavor);
+    publish(new State(Kind.DOWNLOADING, plan.version, plan.notes, "", 0, plan.asset.size, null));
+    download(plan.asset, plan.version, plan.notes, plan.flavor);
   }
 
   private File cachedFile(String version, String flavor) {
     String safe = version.replaceAll("[^0-9A-Za-z._-]", "_");
     return new File(updateDir, "Koma-" + safe + "-" + flavor + ".apk");
+  }
+
+  /** Keeps only the APK for the release being installed; old downloads are dead weight. */
+  private void evictStaleCache(File keep) {
+    File[] files = updateDir.listFiles();
+    if (files == null) return;
+    for (File file : files) {
+      if (!file.isFile() || (keep != null && file.equals(keep))) continue;
+      file.delete();
+    }
   }
 
   private void download(UpdateAsset asset, String version, String notes, String flavor) throws Exception {
@@ -242,6 +325,9 @@ final class UpdateManager {
       byte[] buffer = new byte[64 * 1024];
       int count;
       while ((count = input.read(buffer)) != -1) {
+        if (closed || Thread.currentThread().isInterrupted()) {
+          throw new IllegalStateException("The update was cancelled.");
+        }
         output.write(buffer, 0, count);
         digest.update(buffer, 0, count);
         written += count;
@@ -257,20 +343,21 @@ final class UpdateManager {
       if (asset.size > 0 && written != asset.size) {
         throw new IllegalStateException("The downloaded update was incomplete.");
       }
-      String expected = asset.digest.toLowerCase(Locale.US);
-      if (expected.startsWith("sha256:")) {
-        String actual = hex(digest.digest());
-        if (!actual.equals(expected.substring("sha256:".length()))) {
-          throw new IllegalStateException("The downloaded update failed its SHA-256 check.");
-        }
+      String expected = asset.sha256.toLowerCase(Locale.US);
+      String actual = hex(digest.digest());
+      if (!actual.equals(expected)) {
+        throw new IllegalStateException("The downloaded update failed its SHA-256 check.");
       }
       if (!part.renameTo(finalFile)) {
         throw new IllegalStateException("The downloaded update could not be saved.");
       }
+    } catch (Exception e) {
+      if (part.exists()) part.delete();
+      throw e;
     } finally {
       close(input);
       close(output);
-      if (connection != null) connection.disconnect();
+      closeConnection(connection);
     }
 
     if (part.exists()) part.delete();
@@ -284,10 +371,9 @@ final class UpdateManager {
   }
 
   private boolean matchesAsset(File file, UpdateAsset asset) {
-    if (!file.isFile()) return false;
+    if (!file.isFile() || !asset.hasSha256()) return false;
     if (asset.size > 0 && file.length() != asset.size) return false;
-    String expected = asset.digest.toLowerCase(Locale.US);
-    if (!expected.startsWith("sha256:")) return true;
+    String expected = asset.sha256.toLowerCase(Locale.US);
     try {
       MessageDigest digest = MessageDigest.getInstance("SHA-256");
       byte[] buffer = new byte[64 * 1024];
@@ -295,7 +381,7 @@ final class UpdateManager {
         int count;
         while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count);
       }
-      return hex(digest.digest()).equals(expected.substring("sha256:".length()));
+      return hex(digest.digest()).equals(expected);
     } catch (Exception e) {
       return false;
     }
@@ -316,7 +402,7 @@ final class UpdateManager {
         return bytes.toString("UTF-8");
       }
     } finally {
-      connection.disconnect();
+      closeConnection(connection);
     }
   }
 
@@ -327,14 +413,37 @@ final class UpdateManager {
     connection.setInstanceFollowRedirects(true);
     connection.setRequestProperty("Accept", "application/vnd.github+json");
     connection.setRequestProperty("User-Agent", "Koma-Android/" + BuildConfig.VERSION_NAME);
+    synchronized (this) {
+      if (closed) {
+        connection.disconnect();
+        throw new IllegalStateException("The updater has already stopped.");
+      }
+      activeConnection = connection;
+    }
     return connection;
   }
 
+  private void closeConnection(HttpURLConnection connection) {
+    synchronized (this) {
+      if (activeConnection == connection) activeConnection = null;
+    }
+    if (connection != null) connection.disconnect();
+  }
+
   private void publish(State next) {
-    state = next;
-    final Listener current = listener;
+    final Listener current;
+    synchronized (this) {
+      if (closed) return;
+      state = next;
+      current = listener;
+    }
     if (current == null) return;
-    main.post(() -> current.onUpdateState(next));
+    main.post(() -> {
+      synchronized (UpdateManager.this) {
+        if (closed || listener != current) return;
+      }
+      current.onUpdateState(next);
+    });
   }
 
   JSONObject statusJson() throws Exception {
@@ -355,7 +464,13 @@ final class UpdateManager {
     return result.toString();
   }
 
-  private static String message(Exception error) {
+  private static String checkMessage(Exception error) {
+    String message = error.getMessage();
+    return message == null || message.trim().isEmpty()
+        ? "The update could not be checked." : message;
+  }
+
+  private static String downloadMessage(Exception error) {
     String message = error.getMessage();
     return message == null || message.trim().isEmpty()
         ? "The update could not be downloaded." : message;

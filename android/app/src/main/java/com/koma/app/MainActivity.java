@@ -305,7 +305,11 @@ public class MainActivity extends Activity {
 
   /** Shows or refreshes the native update confirmation when there is one to show. */
   private void onUpdateState(UpdateManager.State state) {
-    if (updatePrompt == null) return;
+    if (activityGone() || updatePrompt == null) return;
+    if (state.kind == UpdateManager.Kind.UP_TO_DATE) {
+      if (updatePrompt.isShowing()) updatePrompt.dismiss();
+      return;
+    }
     if (updatePrompt.isShowing()) {
       updatePrompt.show(state);
       return;
@@ -372,8 +376,11 @@ public class MainActivity extends Activity {
     /** Dismiss the native update card without installing anything. */
     @JavascriptInterface
     public boolean updateCancel() {
-      if (updateManager != null) updateManager.defer();
-      if (updatePrompt != null) updatePrompt.dismissAsLater();
+      runOnUiThread(() -> {
+        if (activityGone()) return;
+        if (updateManager != null) updateManager.defer();
+        if (updatePrompt != null) updatePrompt.dismissAsLater();
+      });
       return true;
     }
 
@@ -727,6 +734,10 @@ public class MainActivity extends Activity {
   protected void onDestroy() {
     // The Node servers keep running with the app process; the WebView goes.
     stopOAuthCallbackServer();
+    if (updatePrompt != null) {
+      updatePrompt.dismissAsLater();
+      updatePrompt = null;
+    }
     if (updateManager != null) updateManager.shutdown();
     if (roomMulticastLock != null && roomMulticastLock.isHeld()) {
       try { roomMulticastLock.release(); } catch (Exception ignored) { }
