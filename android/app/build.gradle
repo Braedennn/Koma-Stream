@@ -57,8 +57,8 @@ def oauthCredential = { String provider, String name ->
 
 // Gradle properties make local test builds possible without editing this file:
 // -PkomaVersionName=1.7.16 -PkomaVersionCode=101
-def appVersionName = providers.gradleProperty('komaVersionName').orElse('1.7.17').get()
-def appVersionCode = providers.gradleProperty('komaVersionCode').map { it.toInteger() }.orElse(10717).get()
+def appVersionName = providers.gradleProperty('komaVersionName').orElse('1.7.18').get()
+def appVersionCode = providers.gradleProperty('komaVersionCode').map { it.toInteger() }.orElse(10718).get()
 
 def parseVersion = { String raw ->
     def match = (raw ?: '').trim() =~ /^[vV]?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/
