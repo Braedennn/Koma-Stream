@@ -47,6 +47,17 @@ const rewrite = text => text
   .replaceAll(`http://127.0.0.1:${BASE_PORT}`, '')
   .replaceAll(`http://localhost:${BASE_PORT}`, '');
 
+// The playlists and files the player itself loads are served by the streaming
+// server directly when it lives on this same machine: the player's segment
+// then takes one hop instead of crossing Koma's Node a second time, which is
+// the whole difference on a small processor. A remote streaming server stays
+// behind the same fence as everything else.
+const BASE_ORIGIN = (() => { try { return new URL(BASE).origin; } catch { return BASE; } })();
+const DIRECT = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(BASE_ORIGIN) ? BASE_ORIGIN : '';
+const absoluteMedia = text => DIRECT
+  ? text.replaceAll(`http://127.0.0.1:${BASE_PORT}`, DIRECT).replaceAll(`http://localhost:${BASE_PORT}`, DIRECT)
+  : text;
+
 function sendJson(res, status, body) {
   const buf = Buffer.from(body);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': buf.length, 'Cache-Control': 'no-store' });
@@ -75,9 +86,15 @@ const goodServer = new Map(); // "anikoto:sub" -> "HD-1"
 
 async function upstreamJson(rest, search, req, ms) {
   const r = await call(`/api${rest}`, search, req, { signal: AbortSignal.timeout(ms) });
-  const body = rewrite(await r.text().catch(() => '{"error":"The streaming server sent an unreadable response."}'));
+  let body = rewrite(await r.text().catch(() => '{"error":"The streaming server sent an unreadable response."}'));
   let data = null;
   try { data = JSON.parse(body); } catch { /* leave null */ }
+  // A direct file the player is going to load can be served by the streaming
+  // server itself, on this machine, without crossing Koma a second time.
+  if (DIRECT && data?.mp4ProxyUrl?.startsWith('/')) {
+    data.mp4ProxyUrl = DIRECT + data.mp4ProxyUrl;
+    body = JSON.stringify(data);
+  }
   return { status: r.status, body, data };
 }
 
@@ -831,7 +848,7 @@ export async function proxyMedia(req, res, path, search) {
     if (hit && Date.now() - hit.at < MASTER_TTL) {
       const chosen = chooseAudio(hit.text, wantLang);
       if (chosen.ok) {
-        const out = Buffer.from(rewrite(chosen.master));
+        const out = Buffer.from(absoluteMedia(chosen.master));
         res.writeHead(200, {
           'Access-Control-Allow-Origin': '*',
           'Content-Type': 'application/vnd.apple.mpegurl',
@@ -870,7 +887,9 @@ export async function proxyMedia(req, res, path, search) {
     const body = await upstream.text().catch(() => '');
     const narrowed = narrow(body);
     if (!narrowed.ok) return noLanguage();
-    const out = Buffer.from(rewrite(narrowed.text));
+    // A playlist is the player's to load: its media points at the streaming
+    // server itself. A subtitle stays same-origin with the master it rode in.
+    const out = Buffer.from(isHls ? absoluteMedia(narrowed.text) : rewrite(narrowed.text));
     headers['content-type'] = type || 'application/octet-stream';
     headers['content-length'] = out.length;
     res.writeHead(upstream.status, headers);
@@ -899,7 +918,7 @@ export async function proxyMedia(req, res, path, search) {
     for await (const c of stream) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
     const narrowed = narrow(Buffer.concat(chunks).toString('utf8'));
     if (!narrowed.ok) return noLanguage();
-    const out = Buffer.from(rewrite(narrowed.text));
+    const out = Buffer.from(absoluteMedia(narrowed.text));
     headers['content-type'] = 'application/vnd.apple.mpegurl';
     headers['content-length'] = out.length;
     res.writeHead(upstream.status, headers);

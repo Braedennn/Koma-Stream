@@ -37,9 +37,13 @@ cpSync(join(here, 'node-src', 'package.json'), join(project, 'package.json'));
 
 // The key travels as a plain file (aapt2 drops dotfiles from assets, so it
 // cannot be called ".env") — the same key the desktop install carries.
-const key = readFileSync(join(sourceAnivault, '.env'), 'utf8').match(/^ANIVAULT_API_KEY=(.+)$/m)?.[1]?.trim();
+// Origins are wildcard because the player loads playlists and segments from
+// the streaming server itself: its own page's origin is the only caller there
+// is on a phone or television, and the media routes stay keyless by design.
+const envTail = readFileSync(join(sourceAnivault, '.env'), 'utf8');
+const key = envTail.match(/^ANIVAULT_API_KEY=(.+)$/m)?.[1]?.trim();
 if (!key) { console.error('No ANIVAULT_API_KEY found in the anivault .env'); process.exit(1); }
-writeFileSync(join(project, 'anivault.env'), `ANIVAULT_API_KEY=${key}\nNODE_ENV=production\n`);
+writeFileSync(join(project, 'anivault.env'), `ANIVAULT_API_KEY=${key}\nNODE_ENV=production\nALLOWED_ORIGINS=*\n`);
 
 // Koma: the server, the API, and the site it serves.
 mkdirSync(join(project, 'koma'));
