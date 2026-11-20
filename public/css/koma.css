@@ -1252,7 +1252,7 @@ html.dlg-open, html.dlg-open body { overflow: hidden; }
 .kplayer.kp-fill video { object-fit: fill; }
 .kplayer.kp-whole .kp-ambient { opacity: 1; }
 .kplayer.idle { cursor: none; }
-.kp-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0, 0, 0, .65), transparent 22%, transparent 60%, rgba(0, 0, 0, .82)); opacity: 0; transition: opacity .2s var(--ease); pointer-events: none; }
+.kp-shade { position: absolute; z-index: 2; inset: 0; background: linear-gradient(180deg, rgba(0, 0, 0, .65), transparent 22%, transparent 60%, rgba(0, 0, 0, .82)); opacity: 0; transition: opacity .2s var(--ease); pointer-events: none; }
 .kplayer.playing:not(.idle) .kp-shade, .kplayer:not(.playing) .kp-shade { opacity: 1; }
 .kp-top { position: absolute; top: 0; left: 0; right: 0; z-index: 4; display: flex; align-items: flex-start; justify-content: space-between; padding: 16px 20px 36px; pointer-events: none; }
 .kp-now { min-width: 0; }
@@ -1356,6 +1356,7 @@ html.dlg-open, html.dlg-open body { overflow: hidden; }
 .kp-menu { position: absolute; z-index: 8; right: 16px; bottom: 66px; width: 270px; max-height: min(440px, calc(100% - 84px)); overflow-y: auto; padding: 7px; border-radius: var(--r); background: rgba(20, 20, 20, .94); border: 1px solid rgba(255, 255, 255, .12); box-shadow: 0 28px 64px -18px rgba(0, 0, 0, .9); animation: rise .22s var(--ease-out) both; overscroll-behavior: contain; backdrop-filter: blur(14px); }
 .kp-sec + .kp-sec { margin-top: 5px; padding-top: 5px; border-top: 1px solid rgba(255, 255, 255, .08); }
 .kp-sec h5 { margin: 4px 8px; font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: rgba(255, 255, 255, .4); }
+.kp-menu-note { padding: 8px 10px; color: rgba(255, 255, 255, .48); font-size: 12.5px; }
 .kp-menu [role="menuitemradio"] { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r-sm); background: none; color: rgba(255, 255, 255, .85); font-size: 13.5px; font-weight: 550; cursor: pointer; text-align: left; transition: background .14s; }
 .kp-menu [role="menuitemradio"]:hover { background: rgba(255, 255, 255, .1); }
 .kp-menu [role="menuitemradio"][aria-checked="true"] { color: #fff; font-weight: 650; }
