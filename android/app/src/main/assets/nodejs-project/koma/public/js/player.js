@@ -103,7 +103,7 @@ export const ccLangPref = () => {
   return ccCodeOf(v) || v;
 };
 
-const fmt = s => {
+export const fmt = s => {
   if (!Number.isFinite(s)) return '0:00';
   s = Math.max(0, Math.round(s));
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
@@ -1141,24 +1141,36 @@ export class Player {
     this.container.dispatchEvent(new CustomEvent('koma:fullscreen', { bubbles: true, detail: { on: !!on } }));
   }
 
+  /**
+   * Take the whole screen, whichever way it is asked for: the shell's
+   * immersive mode on Android, the page's own full screen in a browser. A
+   * television arrives here the moment an episode is chosen - before the
+   * stream has even answered - so this is a take, not a toggle: a screen
+   * already taken is left exactly as it is.
+   */
+  enterFullscreen() {
+    if (this.isFullscreen) return;
+    this.container.classList.add('fs-video');
+    // The page's own view is transformed while it arrives, and a
+    // transformed ancestor is what a fixed box is measured against - so
+    // the fullscreen player would sit below the header instead of over
+    // it. The class on the root lets the stylesheet stand that down.
+    document.documentElement.classList.add('fs-video');
+    if (this.el.full) this.el.full.innerHTML = icon('full-exit');
+    this.el.top.classList.add('with-back');
+    this.moveAudio(true);
+    this.fullscreenEvent(true);
+    requestAnimationFrame(() => this.layoutPicture());
+    try { window.KomaAndroid?.immersive?.(true); } catch { /* a browser */ }
+  }
+
   toggleFullscreen() {
     // The Android shell can give the video the whole window, system bars and
     // all; a browser uses the page's own fullscreen.
     const shell = window.KomaAndroid;
     if (shell?.immersive) {
-      const on = !this.container.classList.contains('fs-video');
-      this.container.classList.toggle('fs-video', on);
-      // The page's own view is transformed while it arrives, and a
-      // transformed ancestor is what a fixed box is measured against - so
-      // the fullscreen player would sit below the header instead of over
-      // it. The class on the root lets the stylesheet stand that down.
-      document.documentElement.classList.toggle('fs-video', on);
-      this.el.full.innerHTML = icon(on ? 'full-exit' : 'full');
-      this.el.top.classList.toggle('with-back', on);
-      this.moveAudio(on);
-      this.fullscreenEvent(on);
-      requestAnimationFrame(() => this.layoutPicture());
-      shell.immersive(on);
+      if (this.container.classList.contains('fs-video')) { this.exitFullscreen(); return; }
+      this.enterFullscreen();
       return;
     }
     if (document.fullscreenElement === this.container) {

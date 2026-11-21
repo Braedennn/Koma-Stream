@@ -1368,10 +1368,17 @@ function back() {
     return true;
   }
   const p = window.komaPlayer;
-  if (p?.isFullscreen) { p.exitFullscreen(); return true; }
   if (p) {
+    // Anything the player has laid over the picture takes the press first,
+    // and only that: the settings, the episode drawer. Full screen is where
+    // the television watches - Back never leaves it in place, it goes back to
+    // the title's own page instead.
     if (p.el?.menu && !p.el.menu.hidden) { p.toggleMenu(false); return true; }
     if (p.el?.drawer && !p.el.drawer.hidden) { p.toggleDrawer(false); return true; }
+    if (p.isFullscreen) {
+      const title = document.querySelector('[data-title-link]')?.getAttribute('href');
+      if (title) { location.replace(title); return true; }
+    }
   }
   if (history.length > 1) { history.back(); return true; }
   // Nowhere to go back to: the app closes.

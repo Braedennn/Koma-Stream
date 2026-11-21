@@ -1,5 +1,6 @@
 import { api, airingSchedule, sourceEpisodes, seasonChain, watchOrder } from '../api.js';
-import { addRewatch, setNote, setScore, setTags, take, watchedSet } from '../store.js';
+import { addRewatch, readProgress, setNote, setScore, setTags, take, watchedSet } from '../store.js';
+import { fmt } from '../player.js';
 import { presenceAnime, setActivity } from '../presence.js';
 import {
   $, $$, big, card, episodeIndex, esc, fuzzyDate, icon, img, initSelect, listBtn, name, plain, pretty, score,
@@ -24,6 +25,12 @@ export async function anime(root, { params: [id], query, alive }) {
   const rank = (a.rankings || []).find(r => r.type === 'RATED' && r.allTime);
   const desc = plain(a.description);
   const seen = watchedSet(a.id);
+  // Where the viewer last stopped, while it is still mid-episode: the details
+  // page offers the resume itself - which episode, and how far into it - so
+  // the choice of where to start is made on a page that can explain it,
+  // instead of asked as a question over a video.
+  const slot = readProgress()[a.id];
+  const resume = slot && slot.ep && slot.t > 20 && slot.dur - slot.t > 30 && !seen.has(slot.ep) ? slot : null;
   const cast = a.characters?.edges || [];
   const rel = (a.relations?.edges || []).filter(e => e.node);
   const recs = (a.recommendations?.nodes || []).map(n => n.mediaRecommendation).filter(Boolean);
@@ -75,7 +82,10 @@ export async function anime(root, { params: [id], query, alive }) {
           </div>
           ${desc ? `<p class="d-syn clamp">${esc(desc.replace(/\s*\n+\s*/g, ' '))}</p>` : ''}
           <div class="d-actions">
-            ${startable ? `<a class="btn btn-primary" href="/watch/${a.id}">${icon('play')}${seen.size ? 'Continue watching' : 'Watch now'}</a>` : ''}
+            ${startable ? (resume
+              ? `<a class="btn btn-primary" href="/watch/${a.id}?ep=${resume.ep}&t=${Math.round(resume.t)}">${icon('play')}Continue Episode ${resume.ep} at ${fmt(resume.t)}</a>
+                 <a class="btn btn-ghost" href="/watch/${a.id}?ep=${resume.ep}">Episode ${resume.ep} from the start</a>`
+              : `<a class="btn btn-primary" href="/watch/${a.id}">${icon('play')}${seen.size ? 'Continue watching' : 'Watch now'}</a>`) : ''}
             ${listBtn(a.id)}
             ${yt && !tv ? `<button class="btn btn-ghost" type="button" data-trailer>${icon('film')}Trailer</button>` : ''}
           </div>

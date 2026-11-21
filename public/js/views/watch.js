@@ -7,7 +7,7 @@ import { $, $$, big, card, episodeIndex, esc, icon, img, initRails, listBtn, nam
 import { Player, ensureHls, getPref, setPref } from '../player.js';
 import { streamWatch, getAudioPref, setAudioPref, initAudioBadges, audioCounts, RESOLVE_TIMEOUT } from '../streaming.js';
 import { clearEpisodeContext, setEpisodeContext, stopPreviews } from '../preview.js';
-import { initRoom, isGuest, openRoomDialog, publish, room, roomUrl, subscribe } from '../room.js';
+import { initRoom, openRoomDialog, publish, room, roomUrl, subscribe } from '../room.js';
 import { presencePaused, presenceProgress, presenceResumed, presenceSeek, presenceStopped, presenceWatching } from '../presence.js';
 
 export async function watch(root, { params: [id], query, alive }) {
@@ -37,6 +37,11 @@ export async function watch(root, { params: [id], query, alive }) {
   const srcP = sourceEpisodes(a);
   let schedule = await schedP;
   const asked = Number(query.get('ep'));
+  // A position is never guessed here: the title's own page offers the resume
+  // explicitly ("Continue Episode 12 at 8:42"), and only that button carries
+  // one. Everything else - the Watch button, a deep link, the next episode -
+  // starts the episode from its beginning.
+  const askedAt = Math.max(0, Number(query.get('t')) || 0);
   // The episode list of this part comes from Koma, which knows which streaming
   // entry holds it. Don't hold the page for it: give it 1.5s, then draw with
   // AniList's list and merge the real one in later. Wait for it fully only
@@ -322,6 +327,10 @@ export async function watch(root, { params: [id], query, alive }) {
   async function loadStream(opts = {}) {
     const seq = ++loadSeq;
     const p = ensurePlayer();
+    // On a television the screen is taken before anything else: the watch
+    // page arrives already full screen, so not one frame of the desktop
+    // layout is painted while the stream resolves.
+    if (isTv()) p.enterFullscreen();
     p.spinner(true);
     p.el.start.hidden = true;
     p.el.error.hidden = true;
@@ -383,13 +392,12 @@ export async function watch(root, { params: [id], query, alive }) {
       return;
     }
 
-    const slot = readProgress()[a.id];
-    let resumeAt = slot && slot.ep === ep.n && slot.t > 20 && slot.dur - slot.t > 30 ? slot.t : 0;
+    // Where an episode starts was decided on the title's own page, by the
+    // button that said so. The player takes the position it was given and
+    // never asks a question a remote would have to answer.
+    let resumeAt = 0;
     if (opts.keepTime && player && player.video.currentTime > 15) resumeAt = player.video.currentTime;
-    // A resume point is offered when the viewer arrives at the episode. An
-    // audio switch or a stream refresh is not an arrival — the viewer is
-    // already watching, so the position is simply kept.
-    const arriving = !(player && player.state.ep === ep.n) && !opts.keepTime;
+    else if (askedAt > 20) resumeAt = askedAt; // the resume button on the title's page
     p.load({
       src: r.hlsProxyUrl || r.mp4ProxyUrl || r.streamUrl,
       mode: r.playbackMode === 'mp4' ? 'mp4' : 'hls',
@@ -400,19 +408,11 @@ export async function watch(root, { params: [id], query, alive }) {
       subtitles: r.subtitles || [],
       poster: ep.thumb || a.bannerImage || big(a),
       resumeAt,
-      // A viewer in someone else's session has no choice to make: the host's
-      // position is the position.
-      resumeAsk: arriving && !isGuest() && !isTv(),
+      resumeAsk: false,
       hasNext: Boolean(nextTarget()),
       hasPrev: Boolean(prevTarget()),
     });
     p.setAudio({ type, canDub: dubAllowed(), counts: audio });
-    // On a television, watching is the whole screen from the first moment:
-    // the loading screen is the player itself, black and spinning, and the
-    // page and its band come back only when the viewer asks for them. So the
-    // full screen is entered the moment the episode is chosen, not when the
-    // first frame finally arrives.
-    if (isTv() && !p.isFullscreen) p.toggleFullscreen();
   }
 
   function gotoEpisode(n) {
