@@ -956,3 +956,15 @@ html.tv .room-code { font-size: 44px; letter-spacing: .1em; }
    canvas is fixed and the drawing is scaled to the set, so a 4K television
    shows the same picture as a 1080p one - the same proportions, the same
    spacing, drawn at the size its own screen asks for. */
+
+/* ---------- watching, on a television ---------- */
+/* Watching is the whole screen from the first moment, so the computer's
+   arrival - the artwork, the large play-button question - is not the
+   television's: the screen is black, the spinner turns, and the picture
+   comes to the viewer. The video element itself is painted black too, so
+   the WebView never shows its empty-media box while the stream loads, and
+   the fullscreen button has nothing left to ask for: Back leaves the
+   player, the way a remote leaves a video. */
+html.tv .kp-start { display: none !important; }
+html.tv .kplayer video { background: #000; }
+html.tv .kp-ic[data-act="full"] { display: none; }

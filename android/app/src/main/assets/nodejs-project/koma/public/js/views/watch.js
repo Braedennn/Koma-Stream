@@ -402,18 +402,17 @@ export async function watch(root, { params: [id], query, alive }) {
       resumeAt,
       // A viewer in someone else's session has no choice to make: the host's
       // position is the position.
-      resumeAsk: arriving && !isGuest(),
+      resumeAsk: arriving && !isGuest() && !isTv(),
       hasNext: Boolean(nextTarget()),
       hasPrev: Boolean(prevTarget()),
     });
     p.setAudio({ type, canDub: dubAllowed(), counts: audio });
-    // On a television, watching is the whole screen. The page and its band
-    // come back the moment the viewer asks for them, so there is nothing to
-    // dismiss first.
-    if (isTv() && !p.isFullscreen) {
-      const start = () => { p.toggleFullscreen(); p.video.removeEventListener('playing', start); };
-      p.video.addEventListener('playing', start);
-    }
+    // On a television, watching is the whole screen from the first moment:
+    // the loading screen is the player itself, black and spinning, and the
+    // page and its band come back only when the viewer asks for them. So the
+    // full screen is entered the moment the episode is chosen, not when the
+    // first frame finally arrives.
+    if (isTv() && !p.isFullscreen) p.toggleFullscreen();
   }
 
   function gotoEpisode(n) {

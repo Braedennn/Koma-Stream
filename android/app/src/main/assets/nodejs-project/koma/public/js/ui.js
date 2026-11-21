@@ -105,7 +105,12 @@ const posterSet = a => (a.coverImage?.large && a.coverImage?.extraLarge
   : '');
 
 export function card(a, { progress = false, note = '', seen: seenIn = null, dismiss = false } = {}) {
-  const href = progress ? `/watch/${a.id}` : `/anime/${a.id}`;
+  // On a television a card opens the details page, like everything else:
+  // watching takes the whole screen, so arriving there is asked for by the
+  // button that says so - never by pointing at a poster.
+  const tvNow = () => document.documentElement.classList.contains('tv')
+    || new URLSearchParams(location.search).get('tv') === '1';
+  const href = progress && !tvNow() ? `/watch/${a.id}` : `/anime/${a.id}`;
   // `seen` lets a caller state how many episodes *this* view counts — the continue
   // watching rail knows what you watched here, which is not always everything marked.
   const seen = progress ? (Number.isFinite(seenIn) ? seenIn : watchedSet(a.id).size) : 0;
