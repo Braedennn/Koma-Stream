@@ -393,11 +393,13 @@ export async function watch(root, { params: [id], query, alive }) {
     }
 
     // Where an episode starts was decided on the title's own page, by the
-    // button that said so. The player takes the position it was given and
-    // never asks a question a remote would have to answer.
+    // button that said so. That position belongs to the arrival alone: the
+    // episode the resume button pointed at. An episode that arrives by
+    // itself - autoplay into the next one, the next button, a deep link -
+    // starts from its beginning, and never inherits the last one's position.
     let resumeAt = 0;
     if (opts.keepTime && player && player.video.currentTime > 15) resumeAt = player.video.currentTime;
-    else if (askedAt > 20) resumeAt = askedAt; // the resume button on the title's page
+    else if (askedAt > 20 && ep.n === asked) resumeAt = askedAt; // the resume button on the title's page
     p.load({
       src: r.hlsProxyUrl || r.mp4ProxyUrl || r.streamUrl,
       mode: r.playbackMode === 'mp4' ? 'mp4' : 'hls',
