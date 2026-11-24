@@ -458,10 +458,18 @@ public class MainActivity extends Activity {
             InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
             if (imm == null) return;
             if (on) {
-              // The field in the page has the focus; the WebView is the view
-              // that holds it, so the keyboard is asked for on the WebView.
-              webView.requestFocus();
-              imm.showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT);
+              // A focused HTML field supplies the input connection, but TV
+              // builds of Gboard can ignore an implicit request made while a
+              // dialog opens. Restart that connection and explicitly show the
+              // IME; the same request also works when the field is clicked
+              // after the keyboard has been dismissed.
+              // Re-focusing an already focused WebView makes Chromium move
+              // the page focus away from the HTML input. Keep the text editor
+              // intact; only recover native focus when another view owns it.
+              if (!webView.hasFocus()) webView.requestFocus();
+              imm.restartInput(webView);
+              boolean shown = imm.showSoftInput(webView, InputMethodManager.SHOW_FORCED);
+              if (!shown) Log.w("Koma", "the television keyboard could not be shown");
             } else {
               imm.hideSoftInputFromWindow(webView.getWindowToken(), 0);
             }

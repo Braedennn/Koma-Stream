@@ -71,8 +71,8 @@ if (openSubtitlesConfigFile.exists()) {
 
 // Gradle properties make local test builds possible without editing this file:
 // -PkomaVersionName=1.7.16 -PkomaVersionCode=101
-def appVersionName = providers.gradleProperty('komaVersionName').orElse('1.7.19').get()
-def appVersionCode = providers.gradleProperty('komaVersionCode').map { it.toInteger() }.orElse(10719).get()
+def appVersionName = providers.gradleProperty('komaVersionName').orElse('1.7.20').get()
+def appVersionCode = providers.gradleProperty('komaVersionCode').map { it.toInteger() }.orElse(10720).get()
 
 def parseVersion = { String raw ->
     def match = (raw ?: '').trim() =~ /^[vV]?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/

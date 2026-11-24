@@ -44,7 +44,7 @@ tag `nodejs`), the app's own trail (`files/koma-log.txt`, via
 The install-and-launch dance used for testing:
 ```
 adb connect 127.0.0.1:5555        # LDPlayer with ADB debugging enabled
-adb install -r -g Koma-1.7.19-phone.apk
+adb install -r -g Koma-1.7.20-phone.apk
 adb shell am force-stop app.koma.stream; adb shell input keyevent KEYCODE_HOME
 adb shell input tap 800 228       # the home-screen icon
 adb forward tcp:14180 tcp:<port> # use the port in files/koma-site.port
@@ -52,7 +52,7 @@ adb forward tcp:14180 tcp:<port> # use the port in files/koma-site.port
 
 ## Install a build
 
-`Koma-1.7.19-phone.apk` and `Koma-1.7.19-tv.apk` are the public release
+`Koma-1.7.20-phone.apk` and `Koma-1.7.20-tv.apk` are the public release
 packages. Copy the phone package to a phone and the TV package to a television.
 Android asks to allow installs from that source once. The release packages use
 the project's permanent signing key; the debug variants are only for local
@@ -83,8 +83,8 @@ installer plus both Android packages, for example:
 
 ```text
 Koma-Setup.exe
-Koma-1.7.19-phone.apk
-Koma-1.7.19-tv.apk
+Koma-1.7.20-phone.apk
+Koma-1.7.20-tv.apk
 ```
 
 The stable names `Koma-phone.apk` and `Koma-tv.apk` are accepted too. A release
@@ -116,15 +116,15 @@ without the APK for the running flavor is ignored by that flavor.
    ```
    -> `app/build/outputs/apk/phone/release/app-phone-release.apk` and
    `app/build/outputs/apk/tv/release/app-tv-release.apk` — then COPY them to
-   `Koma-1.7.19-phone.apk` and `Koma-1.7.19-tv.apk` before installing or
+   `Koma-1.7.20-phone.apk` and `Koma-1.7.20-tv.apk` before installing or
    publishing (the stale-copy trap: verifying one file and installing another
    costs an hour).
 
    Release signing reads `.data/android/release-signing.properties`; that file
    and `koma-release.keystore` are deliberately outside Git. Back both up
    somewhere safe: changing the certificate later means Android cannot install
-   an update over an existing installation. The version code is `10719` for
-   1.7.19 and must rise for every later release.
+   an update over an existing installation. The version code is `10720` for
+   1.7.20 and must rise for every later release.
 
    The TV's integrated OpenSubtitles consumer key reads
    `.data/auth/opensubtitles.json` (`{"apiKey":"…"}`). Gradle injects it only

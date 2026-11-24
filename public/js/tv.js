@@ -984,6 +984,14 @@ function buildSearch() {
   const body = $('.tv-search-body', dlg);
   let timer;
 
+  const showKeyboard = () => {
+    try { window.KomaAndroid?.setTextEntry?.(true); } catch { /* no shell */ }
+  };
+  // Opening Search, returning to the field with the remote, and clicking it
+  // after dismissing the keyboard are all explicit text-entry requests.
+  input.addEventListener('focus', showKeyboard);
+  input.addEventListener('click', showKeyboard);
+
   const paint = (list, q) => {
     const grid = list.length
       ? `<div class="tv-search-grid">${list.map(card).join('')}</div>`
@@ -1065,10 +1073,8 @@ function openSearch() {
   $('.tv-search-body', dlg).innerHTML = '';
   cached = null;
   requestAnimationFrame(() => {
-    input.focus();
-    // The system's keyboard comes up with the field: on a television there is
-    // no other way to type.
-    try { window.KomaAndroid?.setTextEntry?.(true); } catch { /* no shell */ }
+    // The field's focus handler asks the native shell for the TV keyboard.
+    input.focus({ preventScroll: true });
   });
 }
 
@@ -1345,7 +1351,13 @@ function activate() {
     if (input) { input.click(); return true; }
   }
   if (el?.matches?.('input[type="checkbox"]')) { el.click(); return true; }
-  // A text field: the middle button sends the search.
+  // Once the TV keyboard has been dismissed, Center on Search must reopen it
+  // rather than submitting the old query. The keyboard's Search key submits.
+  if (searchDlg?.open && el === searchDlg.querySelector('input')) {
+    el.click();
+    return true;
+  }
+  // Other text fields keep their ordinary form-submit behavior.
   if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
     if (el.form) { try { el.form.requestSubmit?.(); } catch { /* older browser */ } }
     return true;

@@ -34,8 +34,8 @@ A dark, modern anime streaming app for Windows, Android phones and Android TVs �
 Download the package for your device from the [latest release](../../releases/latest):
 
 - **Windows:** `Koma-Setup.exe` — run it, and Koma opens with its servers already running.
-- **Android phone:** `Koma-1.7.19-phone.apk` — open it and allow installs from that source once.
-- **Android TV:** `Koma-1.7.19-tv.apk` — open it with a file manager and allow installs from that source once.
+- **Android phone:** `Koma-1.7.20-phone.apk` — open it and allow installs from that source once.
+- **Android TV:** `Koma-1.7.20-tv.apk` — open it with a file manager and allow installs from that source once.
 
 The Android apps update themselves from the same GitHub release. They download the correct APK in the background, verify it, and still wait for your confirmation before Android's installer opens.
 
