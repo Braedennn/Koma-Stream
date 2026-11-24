@@ -4,8 +4,10 @@
 import { api, airingSchedule, seasonChain, sourceEpisodes } from '../api.js';
 import { addToList, readProgress, setWatched, watchedSet, writeProgress, journalEpisode, showInContinue } from '../store.js';
 import { $, $$, big, card, episodeIndex, esc, icon, img, initRails, listBtn, name, plain, row, setTitle, toast, when, ytId } from '../ui.js';
-import { Player, ensureHls, getPref, setPref } from '../player.js';
-import { streamWatch, getAudioPref, setAudioPref, initAudioBadges, audioCounts, RESOLVE_TIMEOUT } from '../streaming.js';
+import { Player, ccLangPref, ensureHls, getPref, setPref } from '../player.js';
+import { streamWatch, getAudioPref, getDubLanguage, setAudioPref, initAudioBadges, audioCounts, dubLanguageName, normalizeDubLang, RESOLVE_TIMEOUT } from '../streaming.js';
+import { openSubtitleSearch } from '../subtitles.js';
+import { nextPart } from '../franchise.js';
 import { clearEpisodeContext, setEpisodeContext, stopPreviews } from '../preview.js';
 import { initRoom, openRoomDialog, publish, room, roomUrl, subscribe } from '../room.js';
 import { presencePaused, presenceProgress, presenceResumed, presenceSeek, presenceStopped, presenceWatching } from '../presence.js';
@@ -23,8 +25,12 @@ export async function watch(root, { params: [id], query, alive }) {
   // player library, and the stream for the episode we'll most likely open.
   ensureHls();
   const wantType = query.get('type') === 'dub' || query.get('type') === 'sub' ? query.get('type') : getAudioPref();
+  // Dub deep links always mean English, including links saved by older builds.
+  const wantDubLang = query.get('type') === 'dub' ? normalizeDubLang(query.get('dubLang')) : getDubLanguage();
   const guessEp = Number(query.get('ep')) || readProgress()[id]?.ep;
-  if (guessEp) streamWatch({ anilistId: Number(id), ep: guessEp, type: wantType }).catch(() => {});
+  if (guessEp) streamWatch({
+    anilistId: Number(id), ep: guessEp, type: wantType, dubLang: wantDubLang, source: 'anikoto',
+  }).catch(() => {});
 
   // Leaving the page stops the player and drops any stream still resolving.
   let loadSeq = 0;
@@ -41,7 +47,7 @@ export async function watch(root, { params: [id], query, alive }) {
   // explicitly ("Continue Episode 12 at 8:42"), and only that button carries
   // one. Everything else - the Watch button, a deep link, the next episode -
   // starts the episode from its beginning.
-  const askedAt = Math.max(0, Number(query.get('t')) || 0);
+  let askedAt = Math.max(0, Number(query.get('t')) || 0);
   // The episode list of this part comes from Koma, which knows which streaming
   // entry holds it. Don't hold the page for it: give it 1.5s, then draw with
   // AniList's list and merge the real one in later. Wait for it fully only
@@ -61,6 +67,7 @@ export async function watch(root, { params: [id], query, alive }) {
   // again from its beginning, not from its end.
   let ep = list.find(e => e.n === asked) || aired.find(e => !watchedSet(a.id).has(e.n)) || aired[0] || list[0];
   let type = wantType;
+  let dubLang = wantDubLang;
   let mode = (query.get('mode') === 'trailer' || !ep) && yt ? 'trailer' : 'episode';
   let source = 'anikoto';
   let audio = null;
@@ -68,7 +75,7 @@ export async function watch(root, { params: [id], query, alive }) {
   const playable = e => e && !e.later;
   // Hovering an episode in the list plays that episode. The preview needs to
   // know which show is on screen and which audio the viewer wants.
-  setEpisodeContext({ anilistId: a.id, type: () => type, source: () => source });
+  setEpisodeContext({ anilistId: a.id, type: () => type, dubLang: () => dubLang, source: () => source });
 
   /** What shows on the Discord profile while this page is open. */
   function syncPresence() {
@@ -150,48 +157,88 @@ export async function watch(root, { params: [id], query, alive }) {
   const shell = $('.player-shell', root);
   const $seg = $('[data-seg]', root);
   let prefetched = '';
+  const downloadedSubs = new Map(); // "anime:episode" -> explicitly fetched release
 
   /* The player is torn down when the trailer takes over or the page is left.
      On a television its audio switch sits in the band under the picture, so
      it has to go back with the player it belongs to. */
   function dropPlayer() {
-    if (!player) return;
+    // Fullscreen belongs to this view, including a player already replaced by
+    // an embed or an error. Never leak its root class into the next page.
+    document.documentElement.classList.remove('fs-video');
+    if (!player) { window.komaPlayer = null; return; }
+    player.exitFullscreen();
     if (isTv()) player.el.audio.remove();
     player.destroy();
     player = null;
     window.komaPlayer = null;
   }
 
-  // Whether this episode has an English dub. A title can have a dub overall
-  // and still be missing one episode; when that happens the dub button for
-  // this episode is greyed out rather than failing.
+  // English has catalogue-wide availability counts. Other languages are
+  // resolved per episode because those counts say nothing about their tracks.
   let epNoDub = false;
-  const dubAllowed = () => !epNoDub && (!audio || audio.dub > 0);
+  const dubAllowed = () => !epNoDub && (dubLang !== 'en' || !audio || audio.dub > 0);
+  // A failed episode retries the preferred dub on the next one. A catalogue
+  // count of zero describes the whole title, so that English fallback stays.
+  const typeForNextEpisode = () => epNoDub && (dubLang !== 'en' || audio?.dub !== 0) ? getAudioPref() : type;
 
-  audioCounts(a.id).then(c => {
-    if (!alive() || !c) return;
-    audio = c;
-    // The preference says dub, but this title has no dub at all: play the
-    // sub instead and leave the preference alone. The dub button greys out.
-    if (type === 'dub' && c.dub === 0) {
-      type = 'sub';
-      epNoDub = true;
-      syncUrl(); syncAudioUI(); syncPresence();
-      loadStream();
-      return;
-    }
-    syncAudioUI();
-  });
+  let audioRequest = 0;
+  function loadAudioCounts() {
+    const request = ++audioRequest;
+    const id = a.id;
+    audioCounts(id).then(c => {
+      if (!alive() || request !== audioRequest || a.id !== id || !c) return;
+      audio = c;
+      // The preference says dub, but this title has no dub at all: play the
+      // sub instead and leave the preference alone. The dub button greys out.
+      if (type === 'dub' && dubLang === 'en' && c.dub === 0) {
+        type = 'sub';
+        epNoDub = true;
+        syncUrl(); syncAudioUI(); syncPresence();
+        loadStream();
+        publish();
+        return;
+      }
+      syncAudioUI();
+    });
+  }
+  loadAudioCounts();
 
   const idx = () => list.indexOf(ep);
   const prevEp = () => list[idx() - 1] || null;
   const nextEp = () => { const n = list[idx() + 1]; return n && !n.later ? n : null; };
-  // Next/Previous stay inside this season. The list once grew sections for
-  // related seasons here, but those episodes could not be resolved by the
-  // streaming sources, so clicking or autoplaying into them broke the player.
-  const nextTarget = () => nextEp();
+  const atSeasonEnd = () => !nextEp() && !a.nextAiringEpisode
+    && (a.status === 'FINISHED' || Boolean(a.episodes && ep?.n >= a.episodes));
+  let related = null;
+  let relatedFor = 0;
+  let relatedRequest = 0;
+  function prepareRelated() {
+    if (!atSeasonEnd() || relatedFor === a.id) return;
+    const id = a.id;
+    const request = ++relatedRequest;
+    relatedFor = id;
+    related = null;
+    nextPart(a).then(part => {
+      if (!alive() || request !== relatedRequest || a.id !== id) return;
+      related = part;
+      updateUI(); // a resolved sequel enables Next and the player's offer
+      // The relation lookup can outlast a short final episode. Do not strand
+      // a viewer on the ended frame merely because hasNext arrived late.
+      if (part && player?.video?.ended && !player.state.nextCancelled) {
+        player.state.nextShown = true;
+        player.showNextCard();
+      }
+    }).catch(() => {});
+  }
+  // Ordinary Next stays inside the part. Only its actual final episode may
+  // continue into the immediate prequel/sequel relation, including a movie.
+  const nextTarget = () => nextEp() || (atSeasonEnd() ? related : null);
   const prevTarget = () => prevEp();
-  const goNext = () => { const t = nextTarget(); if (t) gotoEpisode(t.n); };
+  const goNext = () => {
+    const target = nextTarget();
+    if (target?.media) gotoPart(target);
+    else if (target) gotoEpisode(target.n);
+  };
   const goPrev = () => { const t = prevTarget(); if (t) gotoEpisode(t.n); };
 
   const drawerHTML = () => `<div class="kp-ep-scroll">${list.map(e => `
@@ -206,6 +253,11 @@ export async function watch(root, { params: [id], query, alive }) {
     onAudio: t => switchAudio(t),
     onRestart: () => { if (mode === 'episode' && playable(ep)) writeProgress(a.id, null); }, // "start from the beginning" drops the saved point
     onRefresh: () => loadStream({ keepTime: true, fresh: true }),
+    onFindSubtitles: () => openSubtitleSearch(player, {
+      title: name(a), language: ccLangPref() || 'en', year: a.seasonYear || a.startDate?.year || 0,
+      season: 0, episode: ep?.n || 1, type: a.format === 'MOVIE' ? 'movie' : 'episode',
+    }),
+    onSubtitleDownload: track => { if (ep) downloadedSubs.set(`${a.id}:${ep.n}`, track); },
     onProgress: (t, dur) => {
       if (mode !== 'episode' || !playable(ep)) return;
       // The playhead belongs to the episode the player is actually showing.
@@ -218,16 +270,38 @@ export async function watch(root, { params: [id], query, alive }) {
       presenceProgress(t, dur); // the profile's progress bar
       // Resolve the next episode in the last couple of minutes so autoplay starts instantly.
       const nt = nextTarget();
-      if (nt && prefetched !== `${a.id}:${nt.n}` && Number.isFinite(dur) && dur - t < 150) {
-        prefetched = `${a.id}:${nt.n}`;
-        streamWatch({ anilistId: a.id, ep: nt.n, type, source }).catch(() => {});
+      const targetId = nt?.media?.id || a.id;
+      const targetEpisode = nt?.episode?.n || nt?.n;
+      const nextType = typeForNextEpisode();
+      const prefetchKey = `${targetId}:${targetEpisode}:${nextType}:${dubLang}`;
+      if (nt && prefetched !== prefetchKey && Number.isFinite(dur) && dur - t < 150) {
+        prefetched = prefetchKey;
+        streamWatch({ anilistId: targetId, ep: targetEpisode, type: nextType, dubLang, source }).catch(() => {});
       }
     },
     onPause: () => { presencePaused(); publish(); },
     onPlay: () => { const p = player; if (p?.video) presenceResumed(p.video.currentTime, p.video.duration); publish(); },
     onSeek: (t, dur) => { if (mode === 'episode' && playable(ep)) presenceSeek(t, dur); publish(); },
     drawerHTML,
-    nextLabel: () => { const t = nextTarget(); return t ? `E${t.n}${t.title ? ` · ${t.title}` : ''}` : ''; },
+    nextLabel: () => {
+      const target = nextTarget();
+      if (!target) return '';
+      if (target.media) return `${name(target.media)} · ${target.media.format === 'MOVIE' ? 'Movie' : `Episode ${target.episode.n}`}`;
+      return `E${target.n}${target.title ? ` · ${target.title}` : ''}`;
+    },
+    nextKicker: () => {
+      const target = nextTarget();
+      return target?.media ? `Next ${target.media.format === 'MOVIE' ? 'movie' : 'season'}` : 'Up next';
+    },
+    nextBehavior: () => {
+      const target = nextTarget();
+      const isRelated = Boolean(target?.media);
+      return {
+        related: isRelated,
+        offer: Boolean(target) && (isRelated || getPref('autoNext')),
+        automatic: Boolean(target) && getPref(isRelated ? 'autoSeason' : 'autoNext'),
+      };
+    },
   };
 
   /* ---------- watch together ---------- */
@@ -237,8 +311,24 @@ export async function watch(root, { params: [id], query, alive }) {
   function followHost(s) {
     if (!s || !alive()) return;
     if (s.animeId && s.animeId !== a.id) { dispatchEvent(new CustomEvent('koma:room-goto', { detail: roomUrl(s) })); return; }
+    const hostType = s.type === 'dub' || s.type === 'sub' ? s.type : type;
+    const hostDubLang = hostType === 'dub' ? normalizeDubLang(s.dubLang) || 'en' : dubLang;
+    let audioChanged = hostType !== type || (hostType === 'dub' && hostDubLang !== dubLang);
+    // Remote state is applied atomically and never round-trips through the
+    // guest's own stored preference. This also covers an episode+audio change
+    // arriving in one paused-host update.
+    if (audioChanged && !(type !== hostType && hostType === 'dub' && hostDubLang === 'en' && audio?.dub === 0)) {
+      type = hostType;
+      dubLang = hostDubLang;
+      epNoDub = false;
+      syncAudioUI();
+    } else audioChanged = false;
     if (s.ep && s.ep !== ep.n) { gotoEpisode(s.ep); return; }
-    if (s.type && s.type !== type && (s.type !== 'dub' || dubAllowed())) { switchAudio(s.type); return; }
+    if (audioChanged) {
+      syncUrl(); syncPresence();
+      loadStream({ keepTime: true });
+      return;
+    }
     const p = player;
     if (!p?.video) return;
     // The host's clock is the clock: their position plus the time that has
@@ -254,7 +344,7 @@ export async function watch(root, { params: [id], query, alive }) {
     playhead: () => {
       if (mode !== 'episode' || !playable(ep) || !player?.video) return null;
       const v = player.video;
-      return { animeId: a.id, ep: ep.n, type, t: Math.round((v.currentTime || 0) * 10) / 10, dur: v.duration || 0, playing: !v.paused && !v.ended };
+      return { animeId: a.id, ep: ep.n, type, ...(type === 'dub' ? { dubLang } : {}), t: Math.round((v.currentTime || 0) * 10) / 10, dur: v.duration || 0, playing: !v.paused && !v.ended };
     },
     remote: followHost,
   });
@@ -280,7 +370,7 @@ export async function watch(root, { params: [id], query, alive }) {
     // The television puts the focus on the player as soon as it is on the
     // screen - it is what the viewer came for.
     dispatchEvent(new CustomEvent('koma:player', { detail: { player } }));
-    player.setAudio({ type, canDub: dubAllowed(), counts: audio });
+    player.setAudio({ type, canDub: dubAllowed(), counts: audio, dubLang });
     player.el.drawerBody.addEventListener('click', e => {
       const b = e.target.closest('[data-ep]');
       if (!b || b.classList.contains('later')) return;
@@ -299,8 +389,9 @@ export async function watch(root, { params: [id], query, alive }) {
   function syncUrl() {
     const q = new URLSearchParams();
     if (ep) q.set('ep', String(ep.n));
-    if (type === 'dub') q.set('type', 'dub');
+    if (type === 'dub') { q.set('type', 'dub'); q.set('dubLang', dubLang); }
     if (mode === 'trailer') q.set('mode', 'trailer');
+    if (isTv()) q.set('tv', '1'); // a browser reload must stay in TV mode
     history.replaceState(history.state, '', `/watch/${a.id}${String(q) ? `?${q}` : ''}`);
   }
 
@@ -341,10 +432,15 @@ export async function watch(root, { params: [id], query, alive }) {
     // much time is left, so its answer arrives before the browser gives up.
     const deadline = Date.now() + RESOLVE_TIMEOUT;
     const waiting = setTimeout(() => p.busyNote('Still looking for a stream…'), 20000);
-    for (const src of [...new Set([source, 'anikoto', 'animeheaven'])]) {
+    const sources = [...new Set([source, 'anikoto', 'animeheaven'])];
+    for (const src of sources) {
       const left = deadline - Date.now();
       if (left <= 0) { lastErr = lastErr || Object.assign(new Error('The streaming server took too long to answer.'), { status: 504 }); break; }
-      try { r = await streamWatch({ anilistId: a.id, ep: ep.n, type, source: src, fresh: opts.fresh, ms: left }); source = src; break; }
+      try {
+        r = await streamWatch({ anilistId: a.id, ep: ep.n, type, dubLang, source: src, fresh: opts.fresh, ms: left });
+        source = r.source || src;
+        break;
+      }
       catch (err) { lastErr = err; }
     }
     clearTimeout(waiting);
@@ -356,8 +452,9 @@ export async function watch(root, { params: [id], query, alive }) {
     // yet. Fall back to the sub for this episode only — the preference stays
     // as it is, and the dub button greys out.
     if (!r && type === 'dub' && lastErr?.status === 404) {
-      toast('No English dub for this episode — back to sub');
+      toast(`No ${dubLanguageName(dubLang)} dub for this episode — back to sub`);
       type = 'sub'; epNoDub = true; syncUrl(); syncAudioUI(); syncPresence();
+      publish();
       return loadStream();
     }
 
@@ -398,23 +495,92 @@ export async function watch(root, { params: [id], query, alive }) {
     // itself - autoplay into the next one, the next button, a deep link -
     // starts from its beginning, and never inherits the last one's position.
     let resumeAt = 0;
-    if (opts.keepTime && player && player.video.currentTime > 15) resumeAt = player.video.currentTime;
+    if (opts.keepTime && player?.state.ep === ep.n && player.video.currentTime > 15) resumeAt = player.video.currentTime;
     else if (askedAt > 20 && ep.n === asked) resumeAt = askedAt; // the resume button on the title's page
+    if (ep.n === asked) askedAt = 0; // one arrival, one resume; never reused on a later visit
+    const downloaded = downloadedSubs.get(`${a.id}:${ep.n}`);
     p.load({
       src: r.hlsProxyUrl || r.mp4ProxyUrl || r.streamUrl,
       mode: r.playbackMode === 'mp4' ? 'mp4' : 'hls',
       title: name(a),
       ep: ep.n, epTitle: ep.title || '',
-      type,
+      type, dubLang,
       intro: r.intro, outro: r.outro,
-      subtitles: r.subtitles || [],
+      subtitles: [...(r.subtitles || []), ...(downloaded ? [downloaded] : [])],
       poster: ep.thumb || a.bannerImage || big(a),
       resumeAt,
       resumeAsk: false,
       hasNext: Boolean(nextTarget()),
       hasPrev: Boolean(prevTarget()),
     });
-    p.setAudio({ type, canDub: dubAllowed(), counts: audio });
+    p.setAudio({ type, canDub: dubAllowed(), counts: audio, dubLang });
+  }
+
+  /** Update the surrounding page without replacing the fullscreen player. */
+  function paintTitle() {
+    for (const link of $$('[data-title-link]', root)) {
+      link.href = `/anime/${a.id}`;
+      link.textContent = name(a);
+    }
+    const poster = $('[data-title-img]', root);
+    if (poster) { poster.src = big(a); poster.classList.toggle('loaded', poster.complete); }
+    const synopsis = $('.now .syn', root);
+    if (synopsis) { synopsis.textContent = plain(a.description) || 'No synopsis yet.'; synopsis.classList.remove('open'); }
+    const oldList = $('.now-actions [data-list]', root) || $('.pb-right [data-list]', root);
+    if (oldList) oldList.outerHTML = listBtn(a.id).replace('class="btn btn-ghost"', 'class="btn btn-ghost btn-sm"');
+  }
+
+  /** A season/movie handoff is an episode swap with a new title, not a route. */
+  function gotoPart(part) {
+    if (!part?.media || part.media.id === a.id) return;
+    if (ep && playable(ep) && !watchedSet(a.id).has(ep.n)) mark(ep.n, true, true);
+    const oldId = a.id;
+    const slot = readProgress()[oldId];
+    if (slot && slot.ep === ep?.n) writeProgress(oldId, null);
+
+    loadSeq++; // a late answer for the old title must not replace the new one
+    relatedRequest++;
+    stopPreviews();
+    player?.toggleDrawer(false);
+    if (player) {
+      player.state.advancing = true; // old time/ended events belong to the old title
+      player.video.pause();
+      clearTimeout(player.state.nextTimer); clearInterval(player.state.nextCountdown);
+      player.state.nextShown = false; player.el.next.hidden = true;
+      player.spinner(true);
+    }
+
+    a = part.media;
+    list.splice(0, list.length, ...part.list);
+    schedule = part.schedule;
+    src = part.source;
+    aired = list.filter(item => !item.later);
+    ep = part.episode;
+    yt = ytId(a);
+    recs = (a.recommendations?.nodes || []).map(n => n.mediaRecommendation).filter(Boolean);
+    mode = 'episode';
+    source = 'anikoto';
+    type = typeForNextEpisode();
+    audio = null;
+    epNoDub = false;
+    askedAt = 0;
+    prefetched = '';
+    related = null;
+    relatedFor = 0;
+
+    showInContinue(a.id);
+    setEpisodeContext({ anilistId: a.id, type: () => type, dubLang: () => dubLang, source: () => source });
+    setTitle(`${name(a)} · ${a.format === 'MOVIE' ? 'Movie' : `Episode ${ep.n}`}`);
+    paintTitle();
+    syncUrl();
+    updateUI();
+    syncPresence();
+    renderRelated();
+    loadAudioCounts();
+    prepareRelated();
+    renderPlayerArea();
+    publish();
+    toast(`Continuing with ${name(a)}${a.format === 'MOVIE' ? ' · Movie' : ` · Episode ${ep.n}`}`);
   }
 
   function gotoEpisode(n) {
@@ -424,43 +590,47 @@ export async function watch(root, { params: [id], query, alive }) {
     const slot = readProgress()[a.id];
     if (slot && slot.ep === ep?.n) writeProgress(a.id, null);
     ep = target;
+    type = typeForNextEpisode();
     epNoDub = false; // a new episode may well be dubbed
     if (mode === 'trailer' && playable(ep)) mode = 'episode';
     setTitle(`${name(a)} · Episode ${ep.n}`);
     syncUrl();
     updateUI();
     syncPresence();
+    prepareRelated();
     renderPlayerArea();
     publish(); // the viewers follow us to the new episode
   }
 
   function switchAudio(t) {
     if (t === type) return;
-    if (t === 'dub' && !dubAllowed()) { toast('No English dub available for this anime'); return; }
-    type = t;
-    epNoDub = false;
+    if (t === 'dub' && !dubAllowed()) { toast(`No ${dubLanguageName(dubLang)} dub available for this anime`); return; }
     setAudioPref(t);
+    // The shared listener applies the new type and language exactly once.
     dispatchEvent(new CustomEvent('koma:audio'));
-    syncUrl();
-    syncAudioUI();
-    syncPresence();
-    loadStream();
-    publish();
   }
 
-  // The preferred language changed in Settings: follow it, unless this title
-  // has no dub to switch to.
+  // Follow the audio preference. Dub language is fixed to English; an audio
+  // event while watching subtitles must not interrupt the Japanese stream.
   addEventListener('koma:audio', function onAudio() {
     if (!alive()) return removeEventListener('koma:audio', onAudio);
     const want = getAudioPref();
-    if (want === type) return;
-    if (want === 'dub' && !dubAllowed()) return;
+    const wantDubLang = getDubLanguage();
+    if (want === type && (type !== 'dub' || wantDubLang === dubLang)) {
+      dubLang = wantDubLang;
+      syncAudioUI();
+      return;
+    }
+    if (want === 'dub' && epNoDub && wantDubLang === dubLang) return;
+    if (want === 'dub' && wantDubLang === 'en' && audio?.dub === 0) return;
     type = want;
+    dubLang = wantDubLang;
     epNoDub = false;
     syncUrl();
     syncAudioUI();
     syncPresence();
-    loadStream();
+    loadStream({ keepTime: true });
+    publish();
   });
 
   function mark(n, on, quiet) {
@@ -473,7 +643,7 @@ export async function watch(root, { params: [id], query, alive }) {
   }
 
   function syncAudioUI() {
-    player?.setAudio({ type, canDub: dubAllowed(), counts: audio });
+    player?.setAudio({ type, canDub: dubAllowed(), counts: audio, dubLang });
   }
 
   function syncPrefUI() {
@@ -512,8 +682,13 @@ export async function watch(root, { params: [id], query, alive }) {
     const next = nextTarget();
     const nextBtn = $('[data-nav="next"]', root);
     nextBtn.hidden = !next;
-    nextBtn.innerHTML = `Next episode${icon('next')}`;
-    if (player) { player.state.hasNext = Boolean(next); player.el.nextBtn.disabled = !next; player.state.hasPrev = Boolean(prevTarget()); player.el.prev.disabled = !player.state.hasPrev; }
+    nextBtn.innerHTML = `${next?.media ? `Next ${next.media.format === 'MOVIE' ? 'movie' : 'season'}` : 'Next episode'}${icon('next')}`;
+    if (player) {
+      player.state.hasNext = Boolean(next);
+      player.el.nextBtn.disabled = !next;
+      player.el.nextBtn.setAttribute('aria-label', next?.media ? `Continue to ${name(next.media)}` : 'Next episode');
+      player.state.hasPrev = Boolean(prevTarget()); player.el.prev.disabled = !player.state.hasPrev;
+    }
     $('.player-bar', root).hidden = mode === 'trailer';
     const seenBtn = $('[data-seen-btn]', root);
     if (ep && playable(ep)) {
@@ -583,8 +758,9 @@ export async function watch(root, { params: [id], query, alive }) {
     slot.innerHTML = `<div class="rows"><div class="seasons-slot"></div>${
       recs.length ? row({ title: 'More like this', sub: 'Recommended by AniList users.', body: recs.map(r => card(r)).join('') }) : ''}</div>`;
     initRails(slot);
+    const id = a.id;
     seasonChain(a).then(chain => {
-      if (!alive() || !slot.isConnected || chain.length < 2) return;
+      if (!alive() || a.id !== id || !slot.isConnected || chain.length < 2) return;
       const box = $('.seasons-slot', slot);
       const body = chain.map((s, i) => {
         const current = s.id === a.id;
@@ -601,13 +777,16 @@ export async function watch(root, { params: [id], query, alive }) {
   syncPrefUI();
   updateUI();
   syncPresence();
+  prepareRelated();
   renderPlayerArea();
 
+  const initialSourceId = a.id;
   if (!src) srcP.then(part => {
-    if (!alive() || !part?.episodes?.length) return;
+    if (!alive() || a.id !== initialSourceId || !part?.episodes?.length) return;
     list.splice(0, list.length, ...episodeIndex(a, schedule, part.episodes, part.offset || 0));
     ep = list.find(e => e.n === ep?.n) || ep;
     aired = list.filter(e => !e.later);
     updateUI();
+    prepareRelated();
   });
 }

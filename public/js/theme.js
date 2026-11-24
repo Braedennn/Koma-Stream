@@ -9,6 +9,13 @@
   try { saved = localStorage.getItem('koma.theme'); } catch (e) { /* private mode */ }
   var theme = saved === 'light' ? 'light' : 'dark';
   document.documentElement.dataset.theme = theme;
+  // Apply stillness before the stylesheet's first paint too. The module boot
+  // repeats this later, after it has installed the system-preference listener.
+  var motion = null;
+  try { motion = localStorage.getItem('koma.motion'); } catch (e) { /* private mode */ }
+  var systemReduced = false;
+  try { systemReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { /* old WebView */ }
+  if (motion === '0' || systemReduced) document.documentElement.classList.add('no-motion');
   // In the desktop app, Windows paints the window's own caption buttons and
   // needs to be told which ground to paint them on.
   try { window.koma && window.koma.theme && window.koma.theme.set(theme); } catch (e) { /* not the app */ }

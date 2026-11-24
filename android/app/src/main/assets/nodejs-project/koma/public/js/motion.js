@@ -15,13 +15,23 @@ const MOTION_KEY = 'koma.motion';
 export const motionOn = () => {
   try { return localStorage.getItem(MOTION_KEY) !== '0'; } catch { return true; }
 };
+// The system preference and Koma's own switch both gate JavaScript-driven
+// motion as well as CSS. A zero-duration animation is still an animation:
+// the hero used to advance continuously when its fill animation ended at once.
+export const motionAllowed = () => motionOn() && !reduced.matches;
 export const setMotion = on => {
   try { localStorage.setItem(MOTION_KEY, on ? '1' : '0'); } catch { /* private mode */ }
   applyMotion();
 };
 export function applyMotion() {
-  document.documentElement.classList.toggle('no-motion', !motionOn());
+  const allowed = motionAllowed();
+  document.documentElement.classList.toggle('no-motion', !allowed);
+  if (!allowed) document.querySelectorAll('.reveal').forEach(el => el.classList.add('in'));
+  document.querySelectorAll('.hero').forEach(el => el.classList.toggle('paused', !allowed));
+  dispatchEvent(new CustomEvent('koma:motion', { detail: { on: allowed } }));
 }
+if (reduced.addEventListener) reduced.addEventListener('change', applyMotion);
+else reduced.addListener(applyMotion); // older Android WebViews
 
 /* The blocks that rise into place as they reach the screen. */
 const REVEAL = '.row, .grid, .genre-grid, .take-grid, .badge-grid, .ep-grid, .week-grid';
@@ -48,8 +58,27 @@ function reveal(el) {
  * they reach the screen. A block already on screen is revealed at once, so
  * nothing is ever left waiting for a scroll that will not come.
  */
+let motionRoot = null;
+let mutations = null;
+let motionWired = false;
+let revealSafety = 0;
+
 export function initMotion(root) {
-  if (reduced.matches || !motionOn() || !('IntersectionObserver' in window)) return;
+  motionRoot = root;
+  if (!motionWired) {
+    motionWired = true;
+    // Start and stop the observers with the preference. Stillness should save
+    // the JavaScript work too, not merely hide its visual result.
+    addEventListener('koma:motion', () => { if (motionRoot) initMotion(motionRoot); });
+  }
+  observer?.disconnect();
+  observer = null;
+  mutations?.disconnect();
+  clearTimeout(revealSafety);
+  if (!motionAllowed() || !('IntersectionObserver' in window)) {
+    root.querySelectorAll(REVEAL).forEach(el => el.classList.add('in'));
+    return;
+  }
 
   observer = new IntersectionObserver((entries, obs) => {
     for (const e of entries) {
@@ -78,15 +107,16 @@ export function initMotion(root) {
     }
   };
 
-  new MutationObserver(muts => {
+  mutations = new MutationObserver(muts => {
     for (const m of muts) for (const n of m.addedNodes) scan(n);
-  }).observe(root, { childList: true, subtree: true });
+  });
+  mutations.observe(root, { childList: true, subtree: true });
 
   scan(root);
 
   // Safety net: a block the observer never reports (hidden, zero-height, or
   // caught mid-layout) must never be left invisible.
-  setTimeout(() => {
+  revealSafety = setTimeout(() => {
     // The height of the page's own canvas, not of the window: on a television
     // the page is drawn on a fixed canvas and scaled to the set, so the
     // window's height is not the height of the screen.
@@ -117,7 +147,7 @@ export function swapView(app, root) {
   const outgoing = live;
   live = root;
 
-  if (!outgoing || outgoing === root || reduced.matches || !motionOn()) {
+  if (!outgoing || outgoing === root || !motionAllowed()) {
     app.replaceChildren(root);
     root.classList.add('view-in');
     return;

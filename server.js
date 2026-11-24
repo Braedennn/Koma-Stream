@@ -11,6 +11,7 @@ import { audioCounts } from './server/audio.js';
 import { ensureDubIndex } from './server/dubindex.js';
 import { handleRoom, lanAddress, roomInfo, setLanHandler } from './server/room.js';
 import * as auth from './server/auth.js';
+import * as subtitles from './server/subtitles.js';
 import { spawn } from 'node:child_process';
 
 if (typeof fetch !== 'function') {
@@ -130,6 +131,52 @@ async function handle(req, res, { lan = false } = {}) {
   }
 
   if (path.startsWith('/api/')) {
+    // Subtitle credentials and download quota stay on this device. Even a
+    // standalone network-facing Koma must not offer these routes to the LAN.
+    if (path.startsWith('/api/subtitles/')) {
+      const address = String(req.socket?.remoteAddress || '');
+      if (!/^(127\.|::1$|::ffff:127\.)/i.test(address)) return send(req, res, 403, '{"error":"Subtitle search is available only on this device."}', TYPES['.json']);
+      const apiKey = String(req.headers['x-opensubtitles-key'] || '');
+      const token = String(req.headers['x-opensubtitles-token'] || '');
+      try {
+        if (path === '/api/subtitles/status' && req.method === 'GET') {
+          return send(req, res, 200, JSON.stringify({ configured: Boolean(apiKey || process.env.KOMA_OPENSUBTITLES_API_KEY), builtIn: Boolean(process.env.KOMA_OPENSUBTITLES_API_KEY), signedIn: Boolean(token) }), TYPES['.json'], { 'Cache-Control': 'no-store' });
+        }
+        if (path === '/api/subtitles/search' && req.method === 'GET') {
+          const result = await subtitles.searchSubtitles({
+            apiKey, token,
+            query: url.searchParams.get('query') || '',
+            language: url.searchParams.get('language') || 'en',
+            year: url.searchParams.get('year') || 0,
+            season: url.searchParams.get('season') || 0,
+            episode: url.searchParams.get('episode') || 0,
+            type: url.searchParams.get('type') || 'episode',
+            page: url.searchParams.get('page') || 1,
+          });
+          return send(req, res, 200, JSON.stringify(result), TYPES['.json'], { 'Cache-Control': 'no-store' });
+        }
+        if (path === '/api/subtitles/login' && req.method === 'POST') {
+          const body = await readJson(req);
+          const result = await subtitles.loginSubtitles({ apiKey, username: body.username, password: body.password });
+          return send(req, res, 200, JSON.stringify(result), TYPES['.json'], { 'Cache-Control': 'no-store' });
+        }
+        if (path === '/api/subtitles/download' && req.method === 'POST') {
+          const body = await readJson(req);
+          const result = await subtitles.downloadSubtitles({ apiKey, token, fileId: body.fileId, language: body.language || 'en', releaseName: body.releaseName || '' });
+          return send(req, res, 200, JSON.stringify(result), TYPES['.json'], { 'Cache-Control': 'no-store' });
+        }
+        const file = /^\/api\/subtitles\/file\/(\d+)$/.exec(path);
+        if (file && (req.method === 'GET' || req.method === 'HEAD')) {
+          const data = await subtitles.readSubtitle(file[1]);
+          if (!data) return send(req, res, 404, JSON.stringify({ error: 'This subtitle is not in the local cache.' }), TYPES['.json'], { 'Cache-Control': 'no-store' });
+          return send(req, res, 200, data, 'text/vtt; charset=utf-8', { 'Cache-Control': 'public, max-age=86400, immutable' });
+        }
+        return send(req, res, 404, JSON.stringify({ error: 'No such subtitle endpoint.' }), TYPES['.json'], { 'Cache-Control': 'no-store' });
+      } catch (error) {
+        const status = error.status || 502;
+        return send(req, res, status, JSON.stringify({ error: error.message, resetAt: error.resetAt || '', retryAfter: error.retryAfter || 0 }), TYPES['.json'], { 'Cache-Control': 'no-store' });
+      }
+    }
     if (path === '/api/auth/config') {
       return send(req, res, 200, JSON.stringify(auth.publicConfig()), TYPES['.json'], { 'Cache-Control': 'no-store' });
     }

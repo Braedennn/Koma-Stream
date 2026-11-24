@@ -9,7 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { gql } from './anilist.js';
-import { AUDIO_LANG, chooseAudio } from './audio-lang.js';
+import { AUDIO_LANG, audioLanguageName, chooseAudio, normalizeDubLang, trackLang } from './audio-lang.js';
 import { anikotoCandidates, anikotoEntry, anikotoEpisodes, findProven, generic, heavenSearch, matchOffset, parseTitle, pickPart, samePart, sameSeries, searchTitle } from './part-map.js';
 
 const BASE = process.env.KOMA_ANIVAULT_URL || 'http://127.0.0.1:3000';
@@ -156,13 +156,48 @@ async function readPlaylist(r, ms = 30000) {
   return text;
 }
 
+/** Language declared by the selected source server, when the site provides it. */
+function declaredLanguage(r) {
+  const data = r?.data || {};
+  return trackLang({ lang: data.dubGroup, name: data.dubGroup })
+    || trackLang({ name: data.server })
+    || (Array.isArray(data.audioTracks) && data.audioTracks.length === 1 ? trackLang(data.audioTracks[0]) : '');
+}
+
 /** The language the stream has to be in for the type that was asked for. */
-function languageCheck(r, type, master) {
-  const want = AUDIO_LANG[type];
-  if (!want || r.status !== 200 || r.data?.playbackMode !== 'hls' || !r.data?.hlsProxyUrl) return null;
-  if (!master) return null; // the playlist says nothing — do not turn the stream away
-  const chosen = chooseAudio(master, want);
+function languageCheck(r, type, master, want = AUDIO_LANG[type]) {
+  const mode = r?.data?.playbackMode;
+  if (!want || r.status !== 200 || !['hls', 'mp4', 'iframe'].includes(mode)) return null;
+  // English/sub sources historically carry one undocumented mixed track, so
+  // their existing behavior stays intact. An explicit non-English dub must be
+  // verified; otherwise an English source could silently win the request.
+  const strict = type === 'dub' && want !== 'en';
+  if (!strict && (mode === 'mp4' || mode === 'iframe')) return null;
+  if (mode !== 'hls' || !r.data?.hlsProxyUrl) {
+    const declared = declaredLanguage(r);
+    return {
+      ok: declared === want, want, tracks: [], unverified: !declared,
+    };
+  }
+  if (!master) {
+    const declared = strict ? declaredLanguage(r) : '';
+    return strict ? { ok: declared === want, want, tracks: [], unverified: !declared } : null;
+  }
+  const chosen = chooseAudio(master, want, { strict });
+  // DesiDub's direct playlists often have one muxed track and no EXT-X-MEDIA
+  // tags. Its selected server can still explicitly name that track's language.
+  if (strict && !chosen.tracks.length) {
+    const declared = declaredLanguage(r);
+    if (declared === want) return { ok: true, master, lang: null, tracks: [], want, verified: true };
+    return { ...chosen, ok: false, want, unverified: !declared };
+  }
   return { ...chosen, want };
+}
+
+function languageFailure(want, unverified = false) {
+  const language = audioLanguageName(want);
+  const error = unverified ? `This stream's ${language} audio could not be verified.` : `This stream has no ${language} audio.`;
+  return { status: 404, body: JSON.stringify({ error }), data: { error }, langMismatch: true };
 }
 
 
@@ -321,7 +356,6 @@ const SOURCE_SITES = process.env.KOMA_SOURCE_SITES
   : [
     { group: 'catalogue', name: 'Anikoto', host: 'anikoto.net' },
     { group: 'catalogue', name: 'AnimeHeaven', host: 'animeheaven.me' },
-    { group: 'catalogue', name: 'DesiDub', host: 'www.desidubanime.me' },
     { group: 'playback', name: 'Megaplay', host: 'megaplay.buzz' },
     { group: 'playback', name: 'Vidwish', host: 'vidwish.live' },
     { group: 'playback', name: 'Vidtube', host: 'vidtube.site' },
@@ -364,9 +398,9 @@ async function sourceProblem(sites = null) {
  * for, and how their episodes are numbered.
  *
  * More than one option when the part is not where the streaming server looked:
- * Animeheaven keeps one entry per part, DesiDub holds the whole season in one
- * entry. Which of them has subs or dubs is the streaming server's business —
- * the watch tries them in turn.
+ * Anikoto and AnimeHeaven can split a show into different entries. Which of
+ * them has subs or English dubs is the streaming server's business — the watch
+ * tries them in turn.
  */
 async function buildPlan(anilistId) {
   const media = await mediaOf(anilistId).catch(() => null);
@@ -421,12 +455,6 @@ async function buildPlan(anilistId) {
 
   const heaven = await heavenPart(media, want, count);
   if (heaven) options.push({ source: 'animeheaven', heavenId: heaven.id, siteId: heaven.id, offset: 0 });
-
-  const desi = await upstreamJson('/episodes', `?anilistId=${anilistId}&source=desidub`, null, 60000).catch(() => null);
-  if (titles.length && desi?.data?.episodes?.length) {
-    const offset = matchOffset(titles, desi.data.episodes);
-    if (offset >= 0) options.push({ source: 'desidub', siteId: desi.data.siteId, offset });
-  }
 
   if (!options.length) {
     // The sites have this part — we know which entry — but the streaming
@@ -487,6 +515,7 @@ async function partEpisodes(anilistId, plan) {
 async function resolveWatch(search, req) {
   const q = new URLSearchParams(search);
   const type = q.get('type') || 'sub';
+  const want = type === 'dub' ? AUDIO_LANG.dub : AUDIO_LANG.sub;
   // Everything below happens inside this budget. A source that hangs must not
   // push the answer past the browser's patience - and the viewer has to be
   // told what stopped it.
@@ -515,10 +544,15 @@ async function resolveWatch(search, req) {
   // playlists should not stop the other site from playing the episode.
   const asked = q.get('source');
   if (asked && !options.some(o => o.source === asked)) options.push({ source: asked, offset: 0 });
+  if (type === 'dub') {
+    // English dub only: never send an old regional deep link to DesiDub.
+    const english = options.filter(o => o.source !== 'desidub');
+    options.splice(0, options.length, ...(english.length ? english : [{ source: 'anikoto', offset: 0 }]));
+  }
   let last = null, mismatch = null, ranOut = false;
   for (const opt of options) {
     if (Date.now() >= deadline) { ranOut = true; break; }
-    const r = await watchOn(opt, q, req, type, deadline);
+    const r = await watchOn(opt, q, req, type, deadline, want);
     if (r.status === 200) return r;
     if (r.langMismatch) mismatch = r;
     last = r;
@@ -592,7 +626,7 @@ function pinnedTo(p, server, fresh = false) {
 /** One source, one episode — the episode number the way that source counts it. */
 export { checkSources, sourceProblem };
 
-export async function watchOn(opt, q, req, type, deadline) {
+export async function watchOn(opt, q, req, type, deadline, want = AUDIO_LANG[type] || AUDIO_LANG.sub) {
   // Every call in here is given only the time that is left. A mirror that
   // hangs must not eat the whole budget: the other mirrors and the other
   // sources still have to be tried inside it.
@@ -603,9 +637,10 @@ export async function watchOn(opt, q, req, type, deadline) {
   if (opt.heavenId) p.set('heavenId', opt.heavenId); else p.delete('heavenId');
   if (opt.anikotoId) p.set('anikotoId', opt.anikotoId); else p.delete('anikotoId');
   if (opt.desidubId) p.set('desidubId', opt.desidubId); else p.delete('desidubId');
+  p.delete('dubLang'); // Koma's preference is not part of AniVault's API.
   const ep = Number(p.get('ep') || 0) + (opt.offset || 0);
   if (Number.isFinite(ep)) p.set('ep', String(ep));
-  const key = `${opt.source}:${type}`;
+  const key = `${opt.source}:${type}:${want || ''}`;
   const remembered = !p.has('server') && goodServer.get(key);
   if (remembered) p.set('server', remembered);
   let r = null, why = '';
@@ -636,66 +671,74 @@ export async function watchOn(opt, q, req, type, deadline) {
     r.body = JSON.stringify(r.data);
   }
 
+  // Direct files retain their historic English/sub behavior. Regional dubs
+  // still walk the other mirrors: a later one may be HLS or name its language.
+  if ((r.data?.playbackMode === 'mp4' || r.data?.playbackMode === 'iframe') && (type !== 'dub' || want === 'en')) return r;
+
   // The answer names the playlist the player will load, and a mirror can hand
   // back a link the host then refuses — the playlist answers 502 and the
   // viewer gets a spinner and nothing else. So the playlist is read here, and
   // the other mirrors of the episode are tried until one actually answers.
   const mirrors = [...new Set([r.data?.server, ...(r.data?.availableServers || [])].filter(s => typeof s === 'string' && s))];
-  let answer = null;
-  let master = null;
+  let answer = null, answerLang = null, mismatch = null;
   for (const server of mirrors) {
     if (left() <= 0) break;
-    const attempt = server === r.data?.server
+    let candidate = server === r.data?.server
       ? r
       : await upstreamJson('/watch', `?${pinnedTo(p, server)}`, req, Math.min(120000, left() || 1)).catch(() => ({ status: 0, body: '', data: null }));
-    if (attempt.status !== 200 || !attempt.data?.hlsProxyUrl) continue;
-    let text = await readPlaylist(attempt, Math.min(30000, left() || 1));
-    if (!text) {
-      // The host refused the link. It may be the link that was signed with a
-      // key the site has since changed, so the mirror is resolved once more
-      // from scratch before it is given up on.
-      if (left() <= 0) break;
-      const again = await upstreamJson('/watch', `?${pinnedTo(p, server, true)}`, req, Math.min(120000, left() || 1)).catch(() => ({ status: 0, body: '', data: null }));
-      if (again.status === 200 && again.data?.hlsProxyUrl) text = await readPlaylist(again, Math.min(30000, left() || 1));
-      if (text) { answer = again; master = text; break; }
-      console.error(`[stream] ${server}: the playlist did not load — trying the next mirror`);
-      continue;
+    if (candidate.status !== 200) continue;
+    const direct = candidate.data?.playbackMode === 'mp4' || candidate.data?.playbackMode === 'iframe';
+    if (!direct && !candidate.data?.hlsProxyUrl) continue;
+    let text = null;
+    if (!direct) {
+      text = await readPlaylist(candidate, Math.min(30000, left() || 1));
+      if (!text) {
+        // The host refused the link. It may be the link that was signed with a
+        // key the site has since changed, so the mirror is resolved once more
+        // from scratch before it is given up on.
+        if (left() <= 0) break;
+        const again = await upstreamJson('/watch', `?${pinnedTo(p, server, true)}`, req, Math.min(120000, left() || 1)).catch(() => ({ status: 0, body: '', data: null }));
+        if (again.status === 200 && again.data?.hlsProxyUrl) {
+          candidate = again;
+          text = await readPlaylist(again, Math.min(30000, left() || 1));
+        }
+        if (!text) {
+          console.error(`[stream] ${server}: the playlist did not load — trying the next mirror`);
+          continue;
+        }
+      }
     }
-    answer = attempt;
-    master = text;
+    // A playable mirror in the wrong language is not a match. Keep walking:
+    // another mirror of the same episode may carry the requested track.
+    const lang = languageCheck(candidate, type, text, want);
+    if (lang && !lang.ok) { mismatch = lang; continue; }
+    answer = candidate;
+    answerLang = lang;
     break;
   }
   if (!answer) {
+    if (mismatch) {
+      if (remembered) goodServer.delete(key);
+      return languageFailure(mismatch.want, mismatch.unverified);
+    }
     // The host refused the playlist. When the host itself cannot be reached
     // from this network, that is worth saying: it is not the episode's fault.
     // And when the budget ran out, the mirrors were never all tried - that is
     // the honest reason.
     const late = left() <= 0;
+    if (remembered) goodServer.delete(key);
     const error = (late
       ? 'The streaming sources took too long to answer from this network.'
       : 'The streaming host refused the playlist for this episode.') + await sourceProblem();
     return { status: late ? 504 : 502, body: JSON.stringify({ error }), data: { error } };
   }
-  // Only a mirror that plays is worth remembering: one that cannot is a worse
-  // way to watch than the next one.
+  // Only a playable mirror in the requested language is worth remembering.
   if (answer.data?.server && answer.data?.playbackMode !== 'iframe') goodServer.set(key, answer.data.server);
   else goodServer.delete(key);
 
-  // The stream has to be in the language that was asked for. One that is not
-  // is passed over, the same way a missing episode is.
-  const lang = languageCheck(answer, type, master);
-  if (lang && !lang.ok) {
-    const what = lang.want === 'en' ? 'English' : 'Japanese';
-    return {
-      status: 404,
-      body: JSON.stringify({ error: `This stream has no ${what} audio.` }),
-      data: { error: `This stream has no ${what} audio.` },
-      langMismatch: true,
-    };
-  }
   // The playlist says which track to play, so the player is told.
-  if (lang?.ok && answer.data?.hlsProxyUrl) {
-    answer.data.hlsProxyUrl += (answer.data.hlsProxyUrl.includes('?') ? '&' : '?') + `lang=${lang.want}`;
+  if (answerLang?.ok && !answerLang.verified && answer.data?.hlsProxyUrl) {
+    answer.data.hlsProxyUrl += (answer.data.hlsProxyUrl.includes('?') ? '&' : '?') + `lang=${encodeURIComponent(answerLang.want)}`;
     answer.body = JSON.stringify(answer.data);
   }
   return answer;
@@ -767,6 +810,9 @@ export async function proxyJson(req, res, rest, search) {
   const q = new URLSearchParams(search || '');
   const fresh = q.get('fresh') === '1';
   q.delete('fresh');
+  // Old regional links share the English answer instead of creating their own
+  // cache entries or triggering a source path Koma no longer offers.
+  if (q.get('type') === 'dub') q.set('dubLang', 'en');
   search = String(q) ? `?${q}` : '';
   const key = `${rest}${search}`;
   if (cacheable && !fresh) {
@@ -840,13 +886,14 @@ function withoutParam(search, name) {
 export async function proxyMedia(req, res, path, search) {
   const isHls = path.startsWith('/api/proxy/hls');
   const { value: wantLang, search: forwarded } = withoutParam(search, 'lang');
+  const strictLang = Boolean(wantLang) && !['en', 'ja'].includes(normalizeDubLang(wantLang));
 
   // The master playlist was read when the stream was resolved: serve that
   // copy, narrowed to the language that was asked for.
   if (isHls && wantLang) {
     const hit = masters.get(forwarded);
     if (hit && Date.now() - hit.at < MASTER_TTL) {
-      const chosen = chooseAudio(hit.text, wantLang);
+      const chosen = chooseAudio(hit.text, wantLang, { strict: strictLang });
       if (chosen.ok) {
         const out = Buffer.from(absoluteMedia(chosen.master));
         res.writeHead(200, {
@@ -877,7 +924,7 @@ export async function proxyMedia(req, res, path, search) {
   const narrow = text => {
     if (!isHls || !wantLang) return { ok: true, text };
     if (!text.trimStart().startsWith('#EXTM3U')) return { ok: true, text };
-    const chosen = chooseAudio(text, wantLang);
+    const chosen = chooseAudio(text, wantLang, { strict: strictLang });
     return { ok: chosen.ok, text: chosen.master };
   };
   const noLanguage = () => sendJson(res, 404, JSON.stringify({ error: 'This stream has no audio in the language that was asked for.' }));

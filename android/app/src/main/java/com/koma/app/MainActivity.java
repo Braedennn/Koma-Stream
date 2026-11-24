@@ -126,6 +126,12 @@ public class MainActivity extends Activity {
     }
     getWindow().setStatusBarColor(Color.TRANSPARENT);
     getWindow().setNavigationBarColor(Color.TRANSPARENT);
+    if (!BuildConfig.IS_TV && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      // Android otherwise paints its own opaque scrim behind gesture navigation,
+      // recreating the black band even though the navigation bar is transparent.
+      getWindow().setStatusBarContrastEnforced(false);
+      getWindow().setNavigationBarContrastEnforced(false);
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
       WindowManager.LayoutParams lp = getWindow().getAttributes();
       lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
@@ -203,10 +209,28 @@ public class MainActivity extends Activity {
     startServers();
   }
 
+  /** Hand the TV's application key to Node without exposing it to the page. */
+  private void prepareOpenSubtitlesConfig() {
+    File config = new File(getFilesDir(), "opensubtitles.json");
+    try {
+      if (BuildConfig.OPENSUBTITLES_API_KEY.isEmpty()) {
+        if (config.exists()) config.delete();
+        return;
+      }
+      String json = new JSONObject().put("apiKey", BuildConfig.OPENSUBTITLES_API_KEY).toString();
+      FileOutputStream out = new FileOutputStream(config, false);
+      out.write(json.getBytes("UTF-8"));
+      out.close();
+    } catch (Exception error) {
+      traceThrowable(this, "could not prepare OpenSubtitles", error);
+    }
+  }
+
   /**
    * Start the Node runtime that hosts Koma and the AniVault streaming API.
    */
   private void startServers() {
+    prepareOpenSubtitlesConfig();
     try {
       trace(this, "starting node runtime");
       // The port the site ends up on belongs to this run: the old note is

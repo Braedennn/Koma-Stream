@@ -8,6 +8,13 @@ import { $$, icon } from './ui.js';
 export const getAudioPref = () => { try { return localStorage.getItem('koma.audio') === 'dub' ? 'dub' : 'sub'; } catch { return 'sub'; } };
 export const setAudioPref = t => { try { localStorage.setItem('koma.audio', t === 'dub' ? 'dub' : 'sub'); } catch { /* private mode */ } };
 
+// Dub playback is English-only. These helpers keep old deep links and room
+// state compatible without allowing an obsolete regional preference to send
+// the scraper looking for audio Koma no longer offers.
+export const normalizeDubLang = () => 'en';
+export const getDubLanguage = () => 'en';
+export const dubLanguageName = () => 'English';
+
 /* ---------- streaming API ---------- */
 export async function streamStatus() {
   try { return (await fetch('/api/stream-status')).ok; } catch { return false; }
@@ -33,8 +40,9 @@ const RESOLVE_TTL = 60e3;
 // answers while the browser is still waiting.
 export const RESOLVE_TIMEOUT = 150e3;
 
-export function streamWatch({ anilistId, ep, type, source = 'anikoto', server, fresh = false, ms = RESOLVE_TIMEOUT }) {
+export function streamWatch({ anilistId, ep, type, dubLang = 'en', source = 'anikoto', server, fresh = false, ms = RESOLVE_TIMEOUT }) {
   const p = new URLSearchParams({ source, anilistId: String(anilistId), ep: String(ep), type });
+  if (type === 'dub') p.set('dubLang', 'en');
   if (server) p.set('server', server);
   const key = String(p);
   const hit = resolved.get(key);

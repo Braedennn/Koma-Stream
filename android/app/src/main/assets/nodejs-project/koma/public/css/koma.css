@@ -1000,6 +1000,11 @@ html.dlg-open, html.dlg-open body { overflow: hidden; }
 
 /* ---------- settings ---------- */
 .settings-modal { width: min(560px, calc(100vw - 32px)); max-height: min(86vh, 720px); overflow: hidden; }
+/* A dialog in the Android top layer does not reliably inherit the body's
+   selection rule. Disable its long-press text handles without disabling text
+   editing in the account fields. */
+html.android:not(.tv) .settings-modal, html.android:not(.tv) .settings-modal * { user-select: none; -webkit-user-select: none; }
+html.android:not(.tv) .settings-modal input, html.android:not(.tv) .settings-modal textarea, html.android:not(.tv) .settings-modal [contenteditable="true"] { user-select: text; -webkit-user-select: text; }
 /* The panel scrolls; the page behind it does not, and the scroll of the panel
    does not carry on into the page when it reaches the end. */
 .settings-body { display: block; padding: 0; max-height: min(86vh, 720px); overflow-y: auto; overscroll-behavior: contain; }
@@ -1673,14 +1678,44 @@ html.android::-webkit-scrollbar,
 html.android ::-webkit-scrollbar { width: 0; height: 0; display: none; }
 html.android .scroll-rail { display: none; }
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
-/* nothing may stay hidden waiting for an animation that will never run */
-.reveal, .reveal.in { opacity: 1 !important; transform: none !important; animation: none !important; }
+  *, *::before, *::after, *::backdrop { animation: none !important; transition: none !important; scroll-behavior: auto !important; backdrop-filter: none !important; }
+  /* Nothing may stay hidden waiting for an animation that will never run. */
+  .reveal, .reveal.in { opacity: 1 !important; transform: none !important; }
+  .card:hover .poster-wrap, .card:focus-within .poster-wrap, .card:hover .poster img, .card:focus-within .poster img { transform: none !important; }
+  .hero-figure .blur, .kp-ambient { display: none !important; }
+  /* Loading feedback still moves; decorative motion does not. */
+  .kplayer .kp-spin { animation: kspin .8s linear infinite !important; }
 }
 
-/* The same stillness, asked for in Settings rather than by the system: a
-   television or a small processor spends its budget on the page, not on the
-   page-turn. One class on the root, and everything holds still. */
-html.no-motion *, html.no-motion *::before, html.no-motion *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
-html.no-motion .reveal, html.no-motion .reveal.in { opacity: 1 !important; transform: none !important; animation: none !important; }
-.kplayer video::cue { background: rgba(0, 0, 0, .55); color: #fff; font-family: var(--font); font-weight: 500; line-height: 1.35; text-shadow: 0 1px 3px rgba(0, 0, 0, .9); }
+/* The same stillness, asked for in Settings rather than by the system. Removing
+   the animations themselves avoids near-zero animationend loops, and removing
+   backdrop filters saves expensive off-screen passes on older Android GPUs. */
+html.no-motion *, html.no-motion *::before, html.no-motion *::after, html.no-motion *::backdrop { animation: none !important; transition: none !important; scroll-behavior: auto !important; backdrop-filter: none !important; }
+html.no-motion .reveal, html.no-motion .reveal.in { opacity: 1 !important; transform: none !important; }
+html.no-motion .card:hover .poster-wrap, html.no-motion .card:focus-within .poster-wrap, html.no-motion .card:hover .poster img, html.no-motion .card:focus-within .poster img { transform: none !important; }
+html.no-motion .hero-figure .blur, html.no-motion .kp-ambient { display: none !important; }
+html.no-motion .kplayer .kp-spin { animation: kspin .8s linear infinite !important; }
+.kplayer video::cue { background: var(--cc-background, rgba(0,0,0,.55)); color: var(--cc-color, #fff); font-family: var(--cc-font, var(--font)); font-size: var(--cc-size, 18px); font-weight: var(--cc-weight, 500); line-height: 1.35; text-shadow: var(--cc-edge, 0 1px 3px rgba(0,0,0,.9)); }
+.kp-menu-action { display: flex; align-items: center; width: 100%; padding: 9px 10px; border: 0; border-top: 1px solid rgba(255,255,255,.1); border-radius: var(--r-sm); background: none; color: var(--accent-2); font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.kp-menu-action:hover, .kp-menu-action:focus { background: rgba(255,255,255,.1); }
+.cc-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.cc-settings-grid label, .subtitle-search-grid label, .os-credentials label { display: flex; flex-direction: column; gap: 6px; color: var(--text-2); font-size: 12px; font-weight: 550; }
+.cc-settings-grid select, .cc-settings-grid input, .subtitle-search-grid input, .subtitle-search-grid select, .os-credentials input { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--bg); color: var(--text); }
+.cc-preview-title { margin-top: 16px; color: var(--text-2); font-size: 12px; font-weight: 550; }
+.cc-preview { display: flex; align-items: flex-end; justify-content: center; min-height: 108px; margin-top: 6px; padding: 18px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-sm); background: radial-gradient(circle at 50% 0, #263041, #050505 72%); color: var(--cc-color, #fff); font-family: var(--cc-font, var(--font)); font-size: var(--cc-size, 18px); font-weight: var(--cc-weight, 500); line-height: 1.35; text-align: center; text-shadow: var(--cc-edge, 0 1px 3px #000); }
+.cc-preview[data-position="top"] { align-items: flex-start; }
+.cc-preview[data-position="bottom"] { padding-bottom: 32px; }
+.cc-preview > span { background: var(--cc-background, rgba(0,0,0,.55)); box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.os-credentials { display: grid; gap: 12px; }
+.os-credentials-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.os-account-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-2); font-size: 13px; }
+.subtitle-search-grid { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(80px, .65fr)); gap: 10px; }
+.subtitle-search-grid .subtitle-query { grid-column: span 2; }
+.subtitle-search-actions { display: flex; align-items: end; gap: 8px; }
+.subtitle-results { display: grid; gap: 8px; max-height: min(48vh, 460px); margin-top: 16px; overflow-y: auto; }
+.subtitle-result { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg-2); }
+.subtitle-result b { display: block; overflow-wrap: anywhere; font-size: 13px; }
+.subtitle-result small { display: block; margin-top: 4px; color: var(--text-2); line-height: 1.45; }
+.subtitle-result .btn { flex: none; }
+.subtitle-empty { padding: 18px 4px; color: var(--text-2); font-size: 13px; line-height: 1.55; }
+@media (max-width: 640px) { .cc-settings-grid, .os-credentials-row { grid-template-columns: 1fr; } .subtitle-search-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } .subtitle-search-grid .subtitle-query { grid-column: 1 / -1; } .subtitle-result { align-items: flex-start; flex-direction: column; } }

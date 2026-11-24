@@ -1,3 +1,4 @@
+import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import java.net.HttpURLConnection
 import java.net.URL
@@ -55,10 +56,23 @@ def oauthCredential = { String provider, String name ->
     return value == null ? '' : value.toString().trim()
 }
 
+// OpenSubtitles supports one application consumer key in a distributed app.
+// Only the TV flavor receives it; the source and phone/desktop builds do not.
+def openSubtitlesConfigFile = rootProject.file('../.data/auth/opensubtitles.json')
+def openSubtitlesApiKey = ''
+if (openSubtitlesConfigFile.exists()) {
+    try {
+        def config = new JsonSlurper().parseText(openSubtitlesConfigFile.getText('UTF-8'))
+        openSubtitlesApiKey = config?.apiKey?.toString()?.trim() ?: ''
+    } catch (error) {
+        throw new GradleException("The OpenSubtitles configuration is not valid JSON: ${error.message}", error)
+    }
+}
+
 // Gradle properties make local test builds possible without editing this file:
 // -PkomaVersionName=1.7.16 -PkomaVersionCode=101
-def appVersionName = providers.gradleProperty('komaVersionName').orElse('1.7.18').get()
-def appVersionCode = providers.gradleProperty('komaVersionCode').map { it.toInteger() }.orElse(10718).get()
+def appVersionName = providers.gradleProperty('komaVersionName').orElse('1.7.19').get()
+def appVersionCode = providers.gradleProperty('komaVersionCode').map { it.toInteger() }.orElse(10719).get()
 
 def parseVersion = { String raw ->
     def match = (raw ?: '').trim() =~ /^[vV]?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/
@@ -215,11 +229,22 @@ def validateKomaRelease = tasks.register('validateKomaRelease') {
     }
 }
 
+def validateTvOpenSubtitles = tasks.register('validateTvOpenSubtitles') {
+    group = 'verification'
+    description = 'Requires the private application key for the TV OpenSubtitles integration.'
+    doLast {
+        if (!openSubtitlesApiKey) {
+            throw new GradleException('The TV OpenSubtitles key is missing. Configure .data/auth/opensubtitles.json.')
+        }
+    }
+}
+
 // Both release flavors depend on the same fail-closed preflight.
 tasks.configureEach { task ->
     if (task.name == 'prePhoneReleaseBuild' || task.name == 'preTvReleaseBuild') {
         task.dependsOn(validateKomaRelease)
     }
+    if (task.name == 'preTvReleaseBuild') task.dependsOn(validateTvOpenSubtitles)
 }
 
 android {
@@ -248,19 +273,21 @@ android {
     // Two apps from one code base: the phone app and the television app.
     // They install side by side - the television keeps its own package name
     // so both can live on the same device - and they differ in the manifest
-    // (leanback launcher, banner), in the build flag the page asks about,
-    // and in nothing else: the site is the same site.
+    // (leanback launcher, banner), the build flag the page asks about, and
+    // the TV's private OpenSubtitles application key. The site is shared.
     flavorDimensions += 'platform'
     productFlavors {
         phone {
             dimension 'platform'
             buildConfigField 'boolean', 'IS_TV', 'false'
+            buildConfigField 'String', 'OPENSUBTITLES_API_KEY', '""'
         }
         tv {
             dimension 'platform'
             applicationIdSuffix '.tv'
             versionNameSuffix '-tv'
             buildConfigField 'boolean', 'IS_TV', 'true'
+            buildConfigField 'String', 'OPENSUBTITLES_API_KEY', JsonOutput.toJson(openSubtitlesApiKey)
         }
     }
 

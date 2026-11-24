@@ -1,5 +1,5 @@
 import { mediaByIds } from '../api.js';
-import { inList, libraryIds, readJournal, readProgress, shelfMap, shelvedOut, watchedMap, watchedSet, continueHidden } from '../store.js';
+import { inList, libraryIds, readJournal, readProgress, remoteContinueMap, shelfMap, shelvedOut, watchedMap, watchedSet, continueHidden } from '../store.js';
 import { continueWatching, watchedShows } from '../continuing.js';
 import { $, airedCount, card, icon, setTitle, skCards } from '../ui.js';
 
@@ -15,7 +15,7 @@ const FILTERS = [
 
 const EMPTY = {
   planned: ['calendar', 'Nothing planned', 'Shows you mean to watch later — put them on the Plan to watch shelf and they wait here.'],
-  watching: ['play', 'Nothing to continue', 'Start an episode and the show lands here — or put it on this shelf yourself.'],
+  watching: ['play', 'Nothing to continue', 'Start an episode, mark it Watching or Rewatching on your connected account, or put it on this shelf yourself.'],
   new: ['list', 'Nothing here yet', 'These are the shows in your library that you haven’t started in Koma.'],
   done: ['check', 'Nothing finished yet', 'Shows you’ve watched all the way through — or put on the Watched shelf — show up here.'],
   hold: ['clock', 'Nothing on hold', 'A show you’re pausing for later can wait here.'],
@@ -24,18 +24,19 @@ const EMPTY = {
 
 const SHELF_NOTE = { planned: 'Plan to watch', watching: 'Continue watching', watched: 'Watched', hold: 'On hold', dropped: 'Dropped' };
 
-/** Where a show sits: the shelf it was put on, or what your own watching says. */
-function stage(a, local, shelf) {
+/** Where a show sits: the shelf it was put on, or what local/account watching says. */
+function stage(a, local, shelf, remote) {
   if (shelf === 'dropped') return 'dropped';
   if (shelf === 'hold') return 'hold';
   if (shelf === 'watched') return 'done';
   if (shelf === 'watching') return 'watching';
   if (shelf === 'planned') return 'planned';
+  // A rewatch has a new position even when the previous run reached the end.
+  if (remote?.[a.id]?.status === 'REPEATING') return 'watching';
   const out = airedCount(a);
   const seen = watchedSet(a.id).size;
   if (a.status === 'FINISHED' && out && seen >= out) return 'done'; // every aired episode is behind you
-  // Watching means local evidence: episodes you finished here, or one in progress.
-  // A show that is only on the list — an AniList watchlist entry especially — is not it.
+  // A list entry alone is not watching; local evidence or CURRENT/REPEATING is.
   return local.has(a.id) ? 'watching' : 'new';
 }
 
@@ -78,12 +79,13 @@ export async function list(root, { alive }) {
     if (!mineNow.length) { off(); return list(root, { alive }); }
     const journal = readJournal();
     const progress = readProgress();
-    const local = new Set(watchedShows({ journal, progress }));
+    const remote = remoteContinueMap();
+    const local = new Set(watchedShows({ journal, progress, remote }));
     const hidden = continueHidden();
-    const entries = continueWatching({ journal, progress, watched: watchedMap(), skip: [...shelvedOut(), ...hidden] });
+    const entries = continueWatching({ journal, progress, watched: watchedMap(), remote, skip: [...shelvedOut(), ...hidden] });
     const byEntry = new Map(entries.map(e => [e.id, e]));
     // A show taken out of Continue watching is not in that filter any more.
-    const inFilter = (a, k) => stage(a, local, shelves[a.id]) === k && !(k === 'watching' && hidden.has(a.id));
+    const inFilter = (a, k) => stage(a, local, shelves[a.id], remote) === k && !(k === 'watching' && hidden.has(a.id));
     const counts = Object.fromEntries(FILTERS.map(([k]) => [k, k === 'all' ? mineNow.length : mineNow.filter(a => inFilter(a, k)).length]));
     $('.filter-tabs', root).innerHTML = FILTERS.map(([k, label]) =>
       `<button type="button" role="tab" data-f="${k}" aria-selected="${filter === k}">${label}<small>${counts[k]}</small></button>`).join('');
@@ -102,13 +104,22 @@ export async function list(root, { alive }) {
   });
   // Re-draw when a show is added or removed, and when an episode you finished changes
   // what you are watching (the journal is what says you watched it).
-  const off = () => { removeEventListener('koma:store', onStore); removeEventListener('koma:journal', onStore); removeEventListener('koma:shelf', onShelf); removeEventListener('koma:continue', onStore); };
+  const off = () => {
+    removeEventListener('koma:store', onStore);
+    removeEventListener('koma:journal', onStore);
+    removeEventListener('koma:shelf', onShelf);
+    removeEventListener('koma:continue', onStore);
+    removeEventListener('koma:remote-continue', onShelf);
+    removeEventListener('koma:route', off);
+  };
   const onStore = () => (alive() ? paint() : off());
-  // A shelf can bring in a show that was never on the list, so the page is drawn again.
+  // A shelf or account pull can bring in a show that was not in the first media batch.
   const onShelf = () => { if (!alive()) return off(); off(); list(root, { alive }); };
   addEventListener('koma:store', onStore);
   addEventListener('koma:journal', onStore);
   addEventListener('koma:shelf', onShelf);
   addEventListener('koma:continue', onStore);
+  addEventListener('koma:remote-continue', onShelf);
+  addEventListener('koma:route', off, { once: true });
   paint();
 }

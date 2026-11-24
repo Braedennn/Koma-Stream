@@ -87,7 +87,11 @@ const visible = el => {
   if (el.closest('.view-out')) return false;
   if (el.classList.contains('skip')) return false;
   const r = el.getBoundingClientRect();
-  return r.width > 0 && r.height > 0;
+  if (!r.width || !r.height) return false;
+  const cs = getComputedStyle(el);
+  // Opacity is deliberately ignored: the controls fade in and out. A control
+  // hidden by the loading state, however, is not a remote target.
+  return cs.visibility !== 'hidden' && cs.display !== 'none';
 };
 
 /* The watch page has a few thousand things to point at, and the list only
@@ -1135,7 +1139,7 @@ const playerButtons = () => {
 const playerMenuItems = () => {
   const m = window.komaPlayer?.el?.menu;
   if (!m || m.hidden) return [];
-  return [...m.querySelectorAll('button')].filter(visible);
+  return [...m.querySelectorAll('button, input[type="checkbox"]')].filter(visible);
 };
 
 const inPlayer = el => !!el?.closest?.('.kplayer');
@@ -1156,6 +1160,9 @@ const playerOverlay = () => {
     p.el?.resumeStart,
     p.el?.bigPlay,
     p.el?.error?.querySelector('[data-retry]'),
+    p.el?.skip,
+    p.el?.next?.querySelector('.kp-next-go'),
+    p.el?.next?.querySelector('.kp-next-cancel'),
   ].filter(b => b && visible(b));
 };
 
@@ -1183,7 +1190,7 @@ const playerDrawerClose = () => {
  */
 function playerMove(dir) {
   const p = window.komaPlayer;
-  if (!p) return false;
+  if (!p || openDialog()) return false;
   const scrub = p.el?.scrub;
   const a = document.activeElement;
   const inFull = !!p.isFullscreen;
@@ -1193,6 +1200,7 @@ function playerMove(dir) {
   if (!inFull && !inPlayer(a)) return false;
 
   const rowBtns = playerButtons();
+  const overlay = playerOverlay();
   const onScrub = a === scrub;
   // Only the buttons of the control row belong to the row. The question on
   // the screen - continue or start again - is in the middle of the picture,
@@ -1251,6 +1259,9 @@ function playerMove(dir) {
       if (rowBtns.length) focusEl(rowBtns[0]);
       return true;
     }
+    // Skip and Up Next sit above the time line. Up reaches the visible action;
+    // left/right then walk its buttons, and Down returns here.
+    if (dir === 'up' && overlay.length) { focusEl(overlay[0]); return true; }
     // There is nothing above the time line. On the page the page's own walk
     // takes it from here.
     return inFull;
@@ -1276,7 +1287,6 @@ function playerMove(dir) {
   // or start again - the play button under it, the retry of a stream that
   // would not play. Down from them is the controls at the bottom of the
   // picture: they are the same picture, so the pad stays inside it.
-  const overlay = playerOverlay();
   if (overlay.includes(a)) {
     const i = overlay.indexOf(a);
     if (dir === 'left' || dir === 'right') {
@@ -1293,10 +1303,17 @@ function playerMove(dir) {
     return true;
   }
 
+  // A transient action can disappear while it has the focus. Recover to a
+  // visible control instead of leaving the remote pointing at nothing.
+  if (inFull && a && inPlayer(a) && !visible(a)) {
+    const target = scrub && visible(scrub) ? scrub : rowBtns[0];
+    if (target) { focusEl(target); return true; }
+  }
+
   // Full screen with the focus somewhere else in the picture: the time line
   // is the only place the pad goes.
   if (inFull) {
-    if (dir === 'down' && scrub) { focusEl(scrub); return true; }
+    if (dir === 'down' && scrub && visible(scrub)) { focusEl(scrub); return true; }
     if (dir === 'left') { p.seekTo(Math.max(0, p.video.currentTime - 10)); return true; }
     if (dir === 'right') { p.seekTo(p.video.currentTime + 10); return true; }
     return true;
@@ -1307,11 +1324,11 @@ function playerMove(dir) {
 function activate() {
   const p = window.komaPlayer;
   const el = document.activeElement;
-  if (p?.isFullscreen) {
+  if (p?.isFullscreen && !openDialog()) {
     // The focus is on one of the player's own controls: that is what the
     // middle button presses. The time line is a slider - the middle button
     // plays and pauses there, like everywhere else.
-    if (el && el !== document.body && p.container.contains(el) && el.matches('button, [role="slider"]')) {
+    if (el && el !== document.body && p.container.contains(el) && el.matches('button, [role="slider"], input[type="checkbox"]')) {
       if (el.matches('[role="slider"]')) { p.togglePlay(); return true; }
       el.click();
       return true;
@@ -1377,7 +1394,12 @@ function back() {
     if (p.el?.drawer && !p.el.drawer.hidden) { p.toggleDrawer(false); return true; }
     if (p.isFullscreen) {
       const title = document.querySelector('[data-title-link]')?.getAttribute('href');
-      if (title) { location.replace(title); return true; }
+      if (title) {
+        const destination = new URL(title, location.href);
+        if (isTv()) destination.searchParams.set('tv', '1');
+        location.replace(destination.href);
+        return true;
+      }
     }
   }
   if (history.length > 1) { history.back(); return true; }
@@ -1724,17 +1746,23 @@ export function initTv() {
 
   // A dialog is a little page of its own: the focus goes inside it, and the
   // page behind it stands still.
+  let dialogWasOpen = false;
   addEventListener('koma:dialog', e => {
     cached = null;
     const dlg = e.detail?.dialog;
+    const wasOpen = dialogWasOpen;
+    dialogWasOpen = Boolean(dlg);
     if (!dlg) {
       // The last dialog on the screen has gone. The tail of the press that
       // dismissed it - the second centre code of a two-code remote, a hold
       // that fires after the panel is already gone, a native click on the
       // release - belongs to that press. Without this, the X that closes a
-      // panel opens the very same panel again at once.
-      markMenuDismissed();
-      shieldActivations();
+      // panel opens the very same panel again at once. The initial "nothing
+      // is open" broadcast is not a dismissal and must not eat the first key.
+      if (wasOpen) {
+        markMenuDismissed();
+        shieldActivations();
+      }
       // The focus came back to the page: the mark goes with it, or the
       // viewer is left looking at a page with no focus on it.
       requestAnimationFrame(() => {

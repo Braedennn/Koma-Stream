@@ -4,11 +4,53 @@
 import { $, $$, esc, icon } from './ui.js';
 
 const PREFS_KEY = 'koma.player';
+const DEFAULT_PREFS = {
+  autoNext: true, autoSeason: false, skipIntro: false, skipOutro: false, autoplay: true, speed: 1, volume: 1, muted: false,
+  cc: null, quality: null, ccLang: null, picture: null,
+  ccSize: 'medium', ccFont: 'sans', ccCustomFont: '', ccColor: 'white', ccBackground: 'dim', ccEdge: 'shadow', ccWeight: '500', ccPosition: 'bottom',
+};
 const prefs = (() => {
-  try { return { autoNext: true, skipIntro: false, skipOutro: false, autoplay: true, speed: 1, volume: 1, muted: false, cc: null, quality: null, ccLang: null, picture: null, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; }
-  catch { return { autoNext: true, skipIntro: false, skipOutro: false, autoplay: true, speed: 1, volume: 1, muted: false, cc: null, quality: null, ccLang: null, picture: null }; }
+  try { return { ...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; }
+  catch { return { ...DEFAULT_PREFS }; }
 })();
 const savePrefs = () => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* private mode */ } };
+
+const CC_STYLE = {
+  size: { small: '14px', medium: '18px', large: '24px', huge: '32px' },
+  font: {
+    sans: 'var(--font)',
+    arial: 'Arial, Helvetica, sans-serif',
+    verdana: 'Verdana, Geneva, sans-serif',
+    tahoma: 'Tahoma, Geneva, sans-serif',
+    trebuchet: '"Trebuchet MS", "Segoe UI", sans-serif',
+    serif: 'Georgia, serif',
+    times: '"Times New Roman", Times, serif',
+    mono: 'monospace',
+    courier: '"Courier New", Courier, monospace',
+  },
+  color: { white: '#fff', yellow: '#ffe66d', cyan: '#79e7ff', green: '#9ff0ad', black: '#111' },
+  background: { none: 'transparent', dim: 'rgba(0,0,0,.55)', solid: 'rgba(0,0,0,.88)' },
+  edge: {
+    none: 'none',
+    shadow: '0 1px 3px rgba(0,0,0,.95), 0 2px 8px rgba(0,0,0,.75)',
+    outline: '-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 2px 3px #000',
+  },
+};
+const ccValue = (kind, value) => CC_STYLE[kind]?.[value] || CC_STYLE[kind][kind === 'size' ? 'medium' : kind === 'color' ? 'white' : kind === 'background' ? 'dim' : kind === 'edge' ? 'shadow' : 'sans'];
+// A custom family is one quoted CSS name, never markup or a declaration. The
+// device supplies the font; Koma falls back to its usual sans font when absent.
+const customCaptionFont = value => {
+  const name = String(value || '').trim().replace(/[\0-\x1f\x7f"\\]/g, '').slice(0, 80);
+  return name ? `"${name}", var(--font)` : CC_STYLE.font.sans;
+};
+export const captionStyle = () => ({
+  '--cc-size': ccValue('size', prefs.ccSize),
+  '--cc-font': prefs.ccFont === 'custom' ? customCaptionFont(prefs.ccCustomFont) : ccValue('font', prefs.ccFont),
+  '--cc-color': ccValue('color', prefs.ccColor),
+  '--cc-background': ccValue('background', prefs.ccBackground),
+  '--cc-edge': ccValue('edge', prefs.ccEdge),
+  '--cc-weight': prefs.ccWeight === '700' ? '700' : '500',
+});
 
 /**
  * How much the picture may be widened to fit a screen that is wider than it
@@ -64,6 +106,8 @@ const CC_CODE = new Map(Object.entries({
   rus: 'ru', russian: 'ru', hin: 'hi', hindi: 'hi', chi: 'zh', zho: 'zh',
   chinese: 'zh', mandarin: 'zh', tur: 'tr', turkish: 'tr', pol: 'pl', polish: 'pl',
   ind: 'id', indonesian: 'id', tha: 'th', thai: 'th', kor: 'ko', korean: 'ko',
+  tam: 'ta', tamil: 'ta', tel: 'te', telugu: 'te', mal: 'ml', malayalam: 'ml',
+  kan: 'kn', kannada: 'kn', ben: 'bn', bengali: 'bn', bangla: 'bn',
 }));
 /* The labels the sources use are all sorts: "Español", "Français", "日本語".
    The settings panel offers these languages, so a track has to be able to say
@@ -84,7 +128,12 @@ const CC_NAMES = [
   [/polish|polski/i, 'pl'],
   [/indonesian/i, 'id'],
   [/thai|ไทย/i, 'th'],
-  [/korean/i, 'ko'],
+  [/korean|한국어/i, 'ko'],
+  [/tamil|தமிழ்/i, 'ta'],
+  [/telugu|తెలుగు/i, 'te'],
+  [/malayalam|മലയാളം/i, 'ml'],
+  [/kannada|ಕನ್ನಡ/i, 'kn'],
+  [/bengali|bangla|বাংলা/i, 'bn'],
 ];
 const ccCodeOf = s => {
   const k = String(s || '').toLowerCase().trim();
@@ -111,14 +160,7 @@ export const fmt = s => {
 };
 
 /** The language of an audio track, as far as the playlist says. */
-const trackLang = t => {
-  const code = String(t?.lang || '').toLowerCase().split(/[-_]/)[0];
-  if (code && code !== 'und') return code;
-  const name = String(t?.name || '').toLowerCase();
-  if (/english|ingles|anglais/.test(name)) return 'en';
-  if (/japanese|japonais|日本語/.test(name)) return 'ja';
-  return '';
-};
+const trackLang = t => ccCodeOf(t?.lang) || ccCodeOf(t?.name);
 
 export class Player {
   /**
@@ -205,12 +247,14 @@ export class Player {
       eps: $('[data-act="eps"]', container), pip: $('[data-act="pip"]', container), full: $('[data-act="full"]', container),
     };
 
-    this.state = { ep: null, type: 'sub', intro: null, outro: null, next: null, hasNext: false, hasPrev: false, started: false, introJumped: false, heuristicOffered: false, nextShown: false, nextTimer: null, nextCountdown: null, retryCount: 0 };
+    this.state = { ep: null, type: 'sub', intro: null, outro: null, next: null, hasNext: false, hasPrev: false, started: false, introJumped: false, heuristicOffered: false, nextShown: false, nextCancelled: false, nextTimer: null, nextCountdown: null, retryCount: 0 };
     this.hls = null;
     this._media = null;
     this.frame = null;   // where the picture ends and the bars of the frame begin
     this._frameTry = null; this._frameBars = false; this._frameTries = 0;
     this._ccWant = false;   // should a caption be showing right now
+    this._ccSelected = '';  // an exact release, when the viewer picked one
+    this._cueOriginal = new WeakMap();
 
     this.video.volume = prefs.volume;
     this.video.muted = prefs.muted;
@@ -219,6 +263,7 @@ export class Player {
 
     this.bind();
     this.updateVolumeUI();
+    this.applyCCStyle();
     this.measureBar();
 
     // Attaching the source runs the media load algorithm, which takes every
@@ -246,6 +291,12 @@ export class Player {
   }
 
   /* ---------- public API ---------- */
+
+  /** Caption appearance lives on the player, so native cues inherit it. */
+  applyCCStyle() {
+    for (const [key, value] of Object.entries(captionStyle())) this.container.style.setProperty(key, value);
+    this.placeCues();
+  }
 
   /** The player takes the shape of the video it is showing, so there are no
    *  black bands beside it, and the phone layout knows how much room its
@@ -417,13 +468,10 @@ export class Player {
   }
 
   /**
-   * Keep the captions on the screen.
-   *
-   * The captions sit at the bottom of the picture. When the picture is
-   * bigger than the screen - which is what happens when a square show is
-   * fitted onto a wide television - the bottom of the picture is off the
-   * screen, and the captions go with it. They are moved up into the part of
-   * the picture that is on the screen.
+   * Keep ordinary bottom captions above the edge and the player controls.
+   * Deliberately positioned source cues keep their original placement. When
+   * the picture is cropped, the visible bottom is used instead of the part of
+   * the picture that has fallen off the screen.
    */
   placeCues() {
     const v = this.video;
@@ -433,21 +481,34 @@ export class Player {
     // The part of the picture that is on the screen.
     const botF = Math.min(1, (box.bottom - r.top) / r.height);
     const over = botF < 0.999 || r.top < box.top - 1;
-    // How far up the caption sits: a little above the bottom of the screen.
+    // Twelve percent leaves room for the controls without putting dialogue
+    // in the middle of the picture. Scale it with the video when it is cropped.
     const lift = 0.12 * box.height / r.height;
+    const bottomLine = Math.max(0, Math.min(100, (botF - lift) * 100));
     for (const track of v.textTracks) {
       if (track.mode !== 'showing') continue;
       for (const cue of track.activeCues || []) {
         if (!cue || typeof cue !== 'object') continue;
-        if (!over) {
-          // Nothing is off the screen: the captions go back where they were.
-          if (cue._komaMoved) { cue.snapToLines = true; cue.line = 'auto'; cue._komaMoved = false; }
+        if (!this._cueOriginal.has(cue)) this._cueOriginal.set(cue, { line: cue.line, snapToLines: cue.snapToLines });
+        const original = this._cueOriginal.get(cue);
+        if (prefs.ccPosition === 'top') {
+          cue.snapToLines = false;
+          cue.line = 7;
+          cue._komaMoved = true;
           continue;
         }
-        // The caption sits just above the bottom of the part of the picture
-        // that is on the screen.
+        if (!over && original.line !== 'auto') {
+          // A release may place a sign or a speaker somewhere deliberately.
+          // Only ordinary automatic bottom captions get the raised position.
+          if (cue._komaMoved) {
+            cue.snapToLines = original.snapToLines;
+            cue.line = original.line;
+            cue._komaMoved = false;
+          }
+          continue;
+        }
         cue.snapToLines = false;
-        cue.line = Math.max(0, Math.min(100, (botF - lift) * 100));
+        cue.line = bottomLine;
         cue._komaMoved = true;
       }
     }
@@ -460,14 +521,16 @@ export class Player {
   }
 
   /** Load an episode into the player without touching the container. */
-  load({ src, mode = 'hls', title, ep, epTitle = '', type, intro, outro, subtitles = [], poster, resumeAt = 0, resumeAsk = true, hasNext, hasPrev, nextLabel = 'Next episode' }) {
+  load({ src, mode = 'hls', title, ep, epTitle = '', type, dubLang = 'en', intro, outro, subtitles = [], poster, resumeAt = 0, resumeAsk = true, hasNext, hasPrev, nextLabel = 'Next episode' }) {
     this.teardownHls();
+    // Until a frame arrives, Android's empty-video placeholder is hidden on TV.
+    this.container.classList.remove('kp-has-video');
     // A new episode may come with bars of its own.
     this.frame = null; this._frameTry = null; this._frameBars = false; this._frameTries = 0;
     clearTimeout(this.state.nextTimer); clearInterval(this.state.nextCountdown);
     Object.assign(this.state, {
-      ep, type, intro: intro || null, outro: outro || null, hasNext, hasPrev,
-      started: false, introJumped: false, outroJumped: false, heuristicOffered: false, nextShown: false, retryCount: 0,
+      ep, type, dubLang, intro: intro || null, outro: outro || null, hasNext, hasPrev,
+      started: false, introJumped: false, outroJumped: false, heuristicOffered: false, nextShown: false, nextCancelled: false, retryCount: 0,
       fatal: 0, refreshed: false, advancing: false,
     });
 
@@ -521,7 +584,7 @@ export class Player {
     // takes every text track off the list, so tracks added before it are
     // wiped — and the caption that should have been showing never is.
     this.setCC(subtitles, type);
-    this._pending = { src, mode, subtitles, resumeAt, type, resumeAsk };
+    this._pending = { src, mode, subtitles, resumeAt, type, dubLang, resumeAsk, epTitle, poster, intro, outro, nextLabel };
 
     if (mode === 'hls' && window.Hls && Hls.isSupported()) {
       this.hls = new Hls({
@@ -571,8 +634,9 @@ export class Player {
     this.armStall(); // if this never becomes playable, tryRefresh takes over instead of an endless spinner
   }
 
-  setAudio({ type, canDub, counts }) {
+  setAudio({ type, canDub, counts, dubLang }) {
     this.state.type = type;
+    this.state.dubLang = dubLang || this.state.dubLang || 'en';
     this.state.canDub = canDub !== false;
     this.el.audio.hidden = false;
     $$('button', this.el.audio).forEach(b => {
@@ -582,7 +646,7 @@ export class Player {
       b.innerHTML = `${b.dataset.audio.toUpperCase()}${n ? `<small>${n}</small>` : ''}`;
       if (b.dataset.audio === 'dub') {
         b.disabled = !this.state.canDub;
-        b.title = this.state.canDub ? (n ? `${n} dubbed episodes` : 'English dub') : 'No English dub available';
+        b.title = this.state.canDub ? (n ? `${n} English dubbed episodes` : 'English dub') : 'No English dub available';
       } else {
         b.title = n ? `${n} subbed episodes` : 'Japanese audio, subtitles';
       }
@@ -597,6 +661,13 @@ export class Player {
     this.el.errMsg.textContent = msg;
     $('[data-retry]', this.el.error).hidden = !this._pending;
     this.spinner(false);
+    // A caller may hide Retry or put the spinner back for an automatic retry.
+    // Announce the finished state on the next frame, not this intermediate one.
+    requestAnimationFrame(() => {
+      if (this.container.isConnected && !this.el.error.hidden) {
+        this.container.dispatchEvent(new CustomEvent('koma:player-error', { bubbles: true }));
+      }
+    });
   }
 
   destroy() {
@@ -707,7 +778,7 @@ export class Player {
   pickAudioTrack() {
     const tracks = this.hls?.audioTracks || [];
     if (tracks.length < 2) return;
-    const want = this.state.type === 'dub' ? 'en' : 'ja';
+    const want = this.state.type === 'dub' ? this.state.dubLang || 'en' : 'ja';
     const i = tracks.findIndex(t => trackLang(t) === want);
     if (i < 0 || i === this.hls.audioTrack) return;
     try { this.hls.audioTrack = i; } catch { /* leave the default */ }
@@ -717,7 +788,7 @@ export class Player {
     this._refreshTally = 0; // the viewer asked for it — grant a fresh recovery budget
     if (!this._pending) return;
     const p = this._pending;
-    this.load({ ...p, resumeAt: this.video.currentTime || p.resumeAt, resumeAsk: false, hasNext: this.state.hasNext, hasPrev: this.state.hasPrev, title: this.el.now.querySelector('h3').textContent, ep: this.state.ep, type: this.state.type });
+    this.load({ ...p, resumeAt: this.video.currentTime || p.resumeAt, resumeAsk: false, hasNext: this.state.hasNext, hasPrev: this.state.hasPrev, title: this.el.now.querySelector('h3').textContent, ep: this.state.ep, type: this.state.type, dubLang: this.state.dubLang });
   }
 
   spinner(on) {
@@ -735,55 +806,57 @@ export class Player {
 
   setCC(subtitles, type) {
     const v = this.video;
+    const selected = this._ccSelected;
     // Hard reset first. A previous episode or an audio switch leaves its
     // tracks behind: a detached element's TextTrack keeps living in
-    // textTracks, and the old code re-enabled whatever ended up first — a
-    // frozen sub track that kept rendering over the new one.
+    // textTracks, and the old code re-enabled whatever ended up first.
     for (const t of [...v.textTracks]) { try { t.mode = 'disabled'; } catch { /* mid-teardown */ } }
     $$('track', v).forEach(t => t.remove());
 
-    // Fresh picks, in the order the source sends them. The user's remembered
-    // caption language wins (prefs.ccLang), then literal English — sources
-    // lead with all sorts (Arabic often landed on top otherwise).
-    const list = subtitles.slice(0, 4);
-    // The table is ours, because Chrome leaves TextTrack.srclang empty even
-    // when the element carries the attribute: the label and the code have to
-    // be remembered here to pick the right track later.
-    this._ccList = list.map(s => ({ label: s.lang || 'Subtitles', code: ccCodeOf(s.lang), url: s.url }));
+    // Keep four source tracks plus the one explicitly downloaded release.
+    const downloaded = subtitles.filter(s => s.source === 'opensubtitles').slice(-1);
+    const list = [...subtitles.filter(s => s.source !== 'opensubtitles').slice(0, 4), ...downloaded];
+    // Identity is explicit: two English releases are two different choices.
+    this._ccList = list.map((s, i) => ({
+      id: String(s.id || `source:${s.url || i}`),
+      label: s.lang || 'Subtitles',
+      code: s.code || ccCodeOf(s.lang),
+      url: s.url,
+      source: s.source || 'source',
+      releaseName: s.releaseName || '',
+      el: null,
+    }));
     this._ccList.forEach(m => {
       const t = document.createElement('track');
       t.kind = 'subtitles';
       t.label = m.label;
       t.srclang = m.code;
       t.src = m.url;
+      m.el = t;
       v.appendChild(t);
     });
+    this._ccSelected = this._ccList.some(m => m.id === selected) ? selected : '';
     this.el.cc.hidden = list.length === 0;
-    const wantOn = prefs.cc === true || (prefs.cc === null && type === 'sub');
-    this._ccWant = wantOn;
+    this._ccWant = prefs.cc === true || (prefs.cc === null && type === 'sub');
     this.applyCC();
   }
 
-  /** The fresh caption tracks of this stream, with their labels and codes.
-   *  Paired by URL, not by position: a track element from elsewhere (the
-   *  source's own manifest, a leftover) must never be mistaken for ours. */
+  /** The fresh caption tracks of this stream, paired to their own elements. */
   ccTracks() {
-    const list = this._ccList || [];
-    const els = [...this.video.querySelectorAll('track')];
-    const tts = [...this.video.textTracks];
     const out = [];
-    list.forEach((m, i) => {
-      let ei = els.findIndex(e => e.getAttribute('src') === m.url);
-      if (ei < 0) ei = els.length - list.length + i; // our own elements are the last ones we added
-      if (ei < 0 || !tts[ei]) return;
-      out.push({ track: tts[ei], label: m.label, code: m.code || els[ei].getAttribute('srclang') || '' });
-    });
+    for (const m of this._ccList || []) {
+      const track = m.el?.track;
+      if (!track) continue;
+      out.push({ id: m.id, track, label: m.label, code: m.code || m.el.getAttribute('srclang') || '', source: m.source, releaseName: m.releaseName });
+    }
     return out;
   }
 
-  /** The track the user wants: their remembered pick, else English, else the first fresh one. */
+  /** The exact pick first, then the remembered language, English, or the first track. */
   preferredCC() {
     const fresh = this.ccTracks();
+    const exact = fresh.find(t => t.id === this._ccSelected);
+    if (exact) return exact;
     const rank = t => {
       const sr = (t.code || '').toLowerCase(), lb = String(t.label || '').toLowerCase();
       const key = String(prefs.ccLang || '').toLowerCase();
@@ -801,6 +874,33 @@ export class Player {
     const pick = this._ccWant ? this.preferredCC() : null;
     if (pick) pick.track.mode = 'showing';
     this.el.cc?.classList.toggle('on', Boolean(pick));
+    this.placeCues();
+  }
+
+  /** Select one particular release, not merely another track in its language. */
+  selectCC(id) {
+    const pick = this.ccTracks().find(t => t.id === id);
+    if (!pick) return false;
+    this._ccSelected = id;
+    this._ccWant = true;
+    prefs.cc = true;
+    prefs.ccLang = ccCodeOf(pick.label) || pick.code || pick.label.toLowerCase();
+    savePrefs();
+    this.applyCC();
+    return true;
+  }
+
+  /** Add or replace the explicitly downloaded OpenSubtitles release. */
+  addSubtitleTrack(track) {
+    if (!track?.url || !track?.id) return false;
+    const current = this._pending?.subtitles || (this._ccList || []).map(m => ({ ...m, lang: m.label }));
+    const base = current.filter(s => s.source !== 'opensubtitles' && s.id !== track.id);
+    const subtitles = [...base, track];
+    if (this._pending) this._pending.subtitles = subtitles;
+    this.setCC(subtitles, this.state.type);
+    const selected = this.selectCC(track.id);
+    if (selected) this.hooks.onSubtitleDownload?.(track);
+    return selected;
   }
 
   /** Show the caption the viewer wants — or none at all. */
@@ -844,6 +944,11 @@ export class Player {
   }
 
   seekTo(t) { try { this.video.currentTime = Math.max(0, Math.min((this.video.duration || 1e9) - 0.5, t)); } catch { /* not ready */ } }
+
+  /** The watch view distinguishes an ordinary episode from a franchise handoff. */
+  nextBehavior() {
+    return this.hooks.nextBehavior?.() || { offer: prefs.autoNext, automatic: prefs.autoNext, related: false };
+  }
 
   nextEpisode() {
     if (this.state.advancing || !this.state.hasNext) return; // one transition at a time — a second fire double-skips
@@ -897,7 +1002,7 @@ export class Player {
       ms.setActionHandler('seekbackward', d => { v.currentTime = Math.max(0, v.currentTime - (d?.seekOffset || 10)); });
       ms.setActionHandler('seekforward', d => { if (Number.isFinite(v.duration)) v.currentTime = Math.min(v.duration - .5, v.currentTime + (d?.seekOffset || 10)); });
       ms.setActionHandler('seekto', d => { if (Number.isFinite(d.seekTime) && d.seekTime <= v.duration) v.currentTime = d.seekTime; });
-      ms.setActionHandler('stop', () => this.pause());
+      ms.setActionHandler('stop', () => this.video.pause());
       ms.setActionHandler('enterpictureinpicture', () => v.requestPictureInPicture?.().catch(() => {}));
       ms.setActionHandler('exitpictureinpicture', () => { if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {}); });
     } catch { /* an unimplemented handler is not a problem */ }
@@ -912,11 +1017,12 @@ export class Player {
     this.removeListeners = () => (this._bound || []).forEach(([el, ev, fn]) => el.removeEventListener(ev, fn));
     const root = this.container;
 
-    on(v, 'loadedmetadata', () => { this.el.dur.textContent = fmt(v.duration); this.spinner(false); this.syncMedia(); this.setShape(); this.layoutPicture(); });
-    on(v, 'loadeddata', () => { this.layoutPicture(); });
+    on(v, 'loadedmetadata', () => { this.el.dur.textContent = fmt(v.duration); this.syncMedia(); this.setShape(); this.layoutPicture(); });
+    on(v, 'loadeddata', () => { root.classList.add('kp-has-video'); this.spinner(false); this.layoutPicture(); });
     on(v, 'canplay', () => this.spinner(false));
     on(v, 'waiting', () => this.spinner(true));
     on(v, 'playing', () => {
+      root.classList.add('kp-has-video');
       this.spinner(false); this.state.started = true; this.el.play.innerHTML = icon('pause'); root.classList.add('playing');
       if (this.video.currentTime > 120) this._refreshTally = 0; // healthy deep playback earns a fresh recovery budget
       this.hooks.onPlay?.();
@@ -1045,9 +1151,11 @@ export class Player {
     this.keyHandler = e => {
       if (!root.isConnected) return this.removeListeners();
       if (e.target.closest('input, textarea, select, [contenteditable="true"]') || e.metaKey || e.ctrlKey || e.altKey) return;
-      // On a television the remote drives the focus, not the keyboard: the
-      // page's own navigation owns the pad unless the video is the screen.
-      if (document.documentElement.classList.contains('tv') && !this.isFullscreen) return;
+      // The TV navigator owns the remote and its keyboard equivalents. Handling
+      // them here as well would seek twice, toggle twice, or close a menu and
+      // leave the page on one Escape. Other shortcuts still work in ?tv=1.
+      const tvOwned = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' ', 'Escape', 'ContextMenu'].includes(e.key);
+      if (document.documentElement.classList.contains('tv') && (!this.isFullscreen || tvOwned)) return;
       // Only act when the player (or nothing in particular) has focus, so the
       // page's own buttons, links and arrow-key scrolling keep working.
       const inPlayer = root.contains(e.target) || document.fullscreenElement === root;
@@ -1075,12 +1183,20 @@ export class Player {
     document.addEventListener('keydown', this.keyHandler);
     this._bound.push([document, 'keydown', this.keyHandler]);
 
-    // autoplay turned off (from the page or the menu): drop a pending countdown
+    // Autoplay settings apply to the card already on screen. A related season
+    // still offers a manual Yes when its separate automatic switch is off.
     on(window, 'koma:prefs', e => {
-      if (e.detail.key === 'autoNext' && !e.detail.value) { clearTimeout(this.state.nextTimer); clearInterval(this.state.nextCountdown); this.el.next.hidden = true; }
+      if (['autoNext', 'autoSeason'].includes(e.detail.key)) {
+        const behavior = this.nextBehavior();
+        if (!behavior.offer && !behavior.automatic) {
+          clearTimeout(this.state.nextTimer); clearInterval(this.state.nextCountdown);
+          this.state.nextShown = false; this.el.next.hidden = true;
+        } else if (!this.el.next.hidden) this.showNextCard();
+      }
       // The language of the subtitles changed: the track on the screen follows
-      // it straight away.
-      if (e.detail.key === 'ccLang') this.applyCC();
+      // it straight away. A language change supersedes an exact release pick.
+      if (e.detail.key === 'ccLang') { this._ccSelected = ''; this.applyCC(); }
+      if (e.detail.key?.startsWith('cc') && !['cc', 'ccLang'].includes(e.detail.key)) this.applyCCStyle();
       // How the picture sits on the screen changed: the picture follows.
       if (e.detail.key === 'picture') this.layoutPicture();
     });
@@ -1223,9 +1339,19 @@ export class Player {
   }
 
   onEnded() {
+    if (this.state.advancing) return; // a stale ended event from the previous source
     this.saveProgressNow();
     this.hooks.onEnded?.(this.state.ep, this.video?.duration);
-    if (prefs.autoNext && this.state.hasNext && !this.state.advancing) this.nextEpisode();
+    const behavior = this.nextBehavior();
+    if (this.state.hasNext && !this.state.nextCancelled && !this.state.advancing) {
+      if (behavior.automatic) this.nextEpisode();
+      // A season/movie handoff is offered even with episode autoplay off. The
+      // viewer's Yes uses the same in-place transition as automatic playback.
+      else if (behavior.offer && this.el.next.hidden) {
+        this.state.nextShown = true;
+        this.showNextCard();
+      }
+    }
   }
 
   /* ---------- skip intro / outro / next card ---------- */
@@ -1282,7 +1408,7 @@ export class Player {
     if (s.outro && t >= s.outro.start && t < s.outro.end - 2 && prefs.skipOutro && !s.outroJumped && !v.paused
       && s.outro.end - s.outro.start >= 20) {
       s.outroJumped = true;
-      if (s.hasNext && prefs.autoNext) { this.toastState('Skipping outro'); this.nextEpisode(); return; }
+      if (s.hasNext && this.nextBehavior().automatic) { this.toastState('Skipping outro'); this.nextEpisode(); return; }
       this.seekTo(s.outro.end);
       return;
     }
@@ -1295,12 +1421,10 @@ export class Player {
       this.el.skip.onclick = () => { this.el.skip.hidden = true; skipTarget != null ? this.seekTo(skipTarget) : this.nextEpisode(); };
     } else this.el.skip.hidden = true;
 
-    // Next-episode card (outro window or final seconds)
-    // The card is the auto-advance UI — its ring counts down to the timer that
-    // loads the next episode. With auto-advance off it has nothing to count
-    // down to, so it never shows; the next button, the N key and the outro
-    // chip still give the move by hand.
-    const nearEnd = prefs.autoNext && s.hasNext && (s.outro ? t >= s.outro.start - 1 : dur - t < 22 && dur > 60);
+    // Next-episode card. Ordinary episodes follow autoNext. A related season
+    // or movie can instead offer a manual Yes, or count down under autoSeason.
+    const behavior = this.nextBehavior();
+    const nearEnd = (behavior.offer || behavior.automatic) && !s.nextCancelled && s.hasNext && (s.outro ? t >= s.outro.start - 1 : dur - t < 22 && dur > 60);
     if (nearEnd && !s.nextShown && (s.outro ? t < s.outro.end : true)) {
       s.nextShown = true;
       this.showNextCard();
@@ -1311,29 +1435,37 @@ export class Player {
 
   showNextCard() {
     const s = this.state;
+    const behavior = this.nextBehavior();
     const label = this.hooks.nextLabel?.() || 'Next episode';
+    const kicker = this.hooks.nextKicker?.() || 'Up next';
+    clearTimeout(s.nextTimer); clearInterval(s.nextCountdown);
+    s.nextTimer = null; s.nextCountdown = null;
     this.el.next.innerHTML = `
-      <div class="kp-next-info"><small>Up next</small><b>${esc(label)}</b></div>
-      <button class="kp-next-go btn btn-primary btn-sm" type="button">${icon('play')}Play now</button>
-      <div class="kp-next-count"><svg viewBox="0 0 36 36"><circle class="track" cx="18" cy="18" r="16"/><circle class="fill" cx="18" cy="18" r="16"/></svg><b>10</b></div>
-      <button class="kp-next-cancel" type="button" aria-label="Cancel autoplay">Cancel</button>`;
+      <div class="kp-next-info"><small>${esc(kicker)}</small><b>${esc(label)}</b></div>
+      <button class="kp-next-go btn btn-primary btn-sm" type="button">${icon('play')}${behavior.related ? 'Yes, continue' : 'Play now'}</button>
+      <div class="kp-next-count"${behavior.automatic ? '' : ' hidden'}><svg viewBox="0 0 36 36"><circle class="track" cx="18" cy="18" r="16"/><circle class="fill" cx="18" cy="18" r="16"/></svg><b>10</b></div>
+      <button class="kp-next-cancel" type="button" aria-label="Cancel autoplay">${behavior.related && !behavior.automatic ? 'No thanks' : 'Cancel'}</button>`;
     this.el.next.hidden = false;
     this.el.next.querySelector('.kp-next-go').onclick = () => this.nextEpisode();
-    this.el.next.querySelector('.kp-next-cancel').onclick = () => { clearTimeout(s.nextTimer); clearInterval(s.nextCountdown); this.el.next.hidden = true; };
+    this.el.next.querySelector('.kp-next-cancel').onclick = () => {
+      s.nextCancelled = true;
+      s.nextShown = false;
+      clearTimeout(s.nextTimer); clearInterval(s.nextCountdown);
+      this.el.next.hidden = true;
+    };
+    if (!behavior.automatic) return; // a manual offer has no countdown or timer
     let left = 10;
     const C = 2 * Math.PI * 16; // ring circumference for r=16
     const ring = this.el.next.querySelector('.fill');
     const setRing = () => ring.style.strokeDashoffset = String(C * (1 - left / 10));
     setRing();
-    clearInterval(s.nextCountdown);
     s.nextCountdown = setInterval(() => {
       left--;
       this.el.next.querySelector('.kp-next-count b').textContent = Math.max(0, left);
       setRing();
       if (left <= 0) clearInterval(s.nextCountdown);
     }, 1000);
-    clearTimeout(s.nextTimer);
-    if (prefs.autoNext) s.nextTimer = setTimeout(() => { clearInterval(s.nextCountdown); this.nextEpisode(); }, 10000);
+    s.nextTimer = setTimeout(() => { clearInterval(s.nextCountdown); this.nextEpisode(); }, 10000);
   }
 
   /* ---------- settings menu ---------- */
@@ -1383,9 +1515,12 @@ export class Player {
     // those must never appear in the picker again.
     const fresh = this.ccTracks();
     const showing = fresh.findIndex(t => t.track.mode === 'showing');
-    const subs = fresh.length
-      ? sec('Subtitles', opt('cc', -1, showing, 'Off') + fresh.map((t, i) => opt('cc', i, showing, t.label)).join(''))
+    const choices = fresh.length
+      ? opt('cc', -1, showing, 'Off') + fresh.map((t, i) => opt('cc', i, showing,
+        t.source === 'opensubtitles' ? `${t.label} · ${t.releaseName || 'OpenSubtitles'}` : t.label)).join('')
       : '';
+    const subs = sec('Subtitles', choices
+      + '<button class="kp-menu-action" type="button" role="menuitem" data-subtitle-find>Find subtitles with OpenSubtitles…</button>');
     const speeds = `<div class="kp-speeds" role="group" aria-label="Speed">${rates.map(r =>
       `<button type="button" role="menuitemradio" data-set="speed" data-val="${r}" aria-checked="${r === prefs.speed}">${r === 1 ? 'Normal' : `${r}×`}</button>`).join('')}</div>`;
     // The picture: the screen filled, or the whole frame with the artwork
@@ -1400,11 +1535,17 @@ export class Player {
       + sec('Playback', ''
         + `<label class="kp-toggle"><input type="checkbox" data-set="autoplay"${prefs.autoplay !== false ? ' checked' : ''}><span class="knob"></span>Autoplay on open</label>`
         + `<label class="kp-toggle"><input type="checkbox" data-set="autoNext"${prefs.autoNext ? ' checked' : ''}><span class="knob"></span>Autoplay next episode</label>`
+        + `<label class="kp-toggle"><input type="checkbox" data-set="autoSeason"${prefs.autoSeason ? ' checked' : ''}><span class="knob"></span>Autoplay next season / movie</label>`
         + `<label class="kp-toggle"><input type="checkbox" data-set="skipIntro"${prefs.skipIntro ? ' checked' : ''}><span class="knob"></span>Auto-skip intro</label>`
         + `<label class="kp-toggle"><input type="checkbox" data-set="skipOutro"${prefs.skipOutro ? ' checked' : ''}><span class="knob"></span>Auto-skip outro</label>`);
   }
 
   onMenuClick(e) {
+    if (e.target.closest('[data-subtitle-find]')) {
+      this.toggleMenu(false);
+      this.hooks.onFindSubtitles?.();
+      return;
+    }
     const t = e.target.closest('[data-set]');
     if (!t) return;
     const { set } = t.dataset;
@@ -1426,14 +1567,9 @@ export class Player {
         prefs.cc = false;
         this.showChosen(false);
       } else {
-        // Remember the language so the next episode — and any stream after an
-        // audio switch — opens with the same captions (English until you pick).
-        // The code is what is kept, so the settings panel and the player agree
-        // on what "English" means.
+        // Exact identity matters when two releases share a language.
         const pick = this.ccTracks()[n];
-        if (pick) prefs.ccLang = ccCodeOf(pick.label) || pick.code || pick.label.toLowerCase();
-        prefs.cc = true;
-        this.showChosen(true);
+        if (pick) this.selectCC(pick.id);
       }
       savePrefs();
       this.toggleMenu(false);
@@ -1454,6 +1590,6 @@ export class Player {
       this.toastState(mode === 'fill' ? 'The picture is fitted to the screen' : 'The whole frame, with the artwork around it');
       return;
     }
-    if (set === 'autoplay' || set === 'autoNext' || set === 'skipIntro' || set === 'skipOutro') setPref(set, t.checked);
+    if (set === 'autoplay' || set === 'autoNext' || set === 'autoSeason' || set === 'skipIntro' || set === 'skipOutro') setPref(set, t.checked);
   }
 }

@@ -1,5 +1,5 @@
 import { api, mediaByIds } from '../api.js';
-import { readJournal, readProgress, shelvedOut, watchedIds, watchedMap, continueHidden } from '../store.js';
+import { readJournal, readProgress, remoteContinueMap, shelvedOut, watchedIds, watchedMap, continueHidden } from '../store.js';
 import { continueWatching, watchedShows } from '../continuing.js';
 import { genreWeights, rankCandidates, topGenres } from '../taste.js';
 import { $, airedCount, cap, card, genreTile, hero, initHero, initRails, rankCard, row, setTitle, skRow } from '../ui.js';
@@ -39,39 +39,61 @@ export async function home(root, { alive }) {
   forYou($('#foryou', root), alive);
 }
 
-/* "Continue watching" — what you actually watch, in Koma. The evidence is local:
- * episodes you finished here (the journal) and the episode you are in the middle of
- * (the resume point). A show that is only on your list — an AniList watchlist entry
- * especially — is not something you are watching, so it never shows up here. */
+/* "Continue watching" — local journal/resume evidence plus the active account's
+ * explicit Watching and Rewatching entries. Planning and other list statuses stay out. */
 async function continueRail(slot, alive) {
-  const journal = readJournal();
-  const progress = readProgress();
-  const hidden = continueHidden();
-  const ids = watchedShows({ journal, progress }).filter(id => !hidden.has(id));
-  if (!ids.length) return;
-  let media;
-  try { media = await mediaByIds(ids); } catch { return; }
-  if (!alive()) return;
-  const aired = Object.fromEntries(media.map(a => [a.id, airedCount(a)]));
-  const entries = continueWatching({ journal, progress, watched: watchedMap(), aired, skip: [...shelvedOut(), ...hidden] });
-  if (!entries.length) return;
-  const byId = new Map(media.map(a => [a.id, a]));
-  slot.insertAdjacentHTML('afterend', row({
-    title: 'Continue watching',
-    sub: 'Only what you actually watch here — watchlist additions stay out.',
-    link: '/list',
-    body: entries.map(e => {
-      const a = byId.get(e.id);
-      if (!a) return '';
-      const note = e.kind === 'mid'
-        ? `Episode ${e.ep}${e.left ? ` · ${e.left} min left` : ''}`
-        : `Episode ${e.ep} next`;
-      return card(a, { progress: true, note, seen: e.watched, dismiss: true });
-    }).join(''),
-  }));
-  const section = slot.nextElementSibling;
-  slot.remove();
-  initRails(section);
+  let generation = 0;
+  let closed = false;
+  const rendered = () => slot.nextElementSibling?.hasAttribute('data-continue-rail') ? slot.nextElementSibling : null;
+  const close = () => {
+    closed = true;
+    generation++;
+    removeEventListener('koma:remote-continue', onRemote);
+    removeEventListener('koma:continue', onRemote);
+    removeEventListener('koma:route', close);
+  };
+  const update = async () => {
+    if (closed) return;
+    const version = ++generation;
+    const journal = readJournal();
+    const progress = readProgress();
+    const remote = remoteContinueMap();
+    const hidden = continueHidden();
+    const ids = watchedShows({ journal, progress, remote }).filter(id => !hidden.has(id));
+    if (!ids.length) { rendered()?.remove(); return; }
+    let media;
+    try { media = await mediaByIds(ids); } catch { return; }
+    if (closed || !alive() || version !== generation) return;
+    const aired = Object.fromEntries(media.map(a => [a.id, airedCount(a)]));
+    const entries = continueWatching({ journal, progress, watched: watchedMap(), remote, aired, skip: [...shelvedOut(), ...hidden] });
+    rendered()?.remove();
+    if (!entries.length) return;
+    const byId = new Map(media.map(a => [a.id, a]));
+    slot.insertAdjacentHTML('afterend', row({
+      title: 'Continue watching',
+      sub: 'Your watching here, plus Watching and Rewatching on your connected account.',
+      link: '/list',
+      body: entries.map(e => {
+        const a = byId.get(e.id);
+        if (!a) return '';
+        const note = e.kind === 'mid'
+          ? `Episode ${e.ep}${e.left ? ` · ${e.left} min left` : ''}`
+          : `Episode ${e.ep} next`;
+        return card(a, { progress: true, note, seen: e.watched, dismiss: true });
+      }).join(''),
+    }));
+    const section = slot.nextElementSibling;
+    section.dataset.continueRail = '';
+    initRails(section);
+  };
+  const onRemote = () => {
+    if (!alive()) return close();
+    update();
+  };
+  addEventListener('koma:remote-continue', onRemote);
+  addEventListener('koma:continue', onRemote);
+  addEventListener('koma:route', close, { once: true });
+  await update();
 }
 
 /* "For you" — the local taste model. Journal events become genre weights, the two

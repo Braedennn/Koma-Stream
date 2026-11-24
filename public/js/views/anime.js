@@ -1,6 +1,7 @@
 import { api, airingSchedule, sourceEpisodes, seasonChain, watchOrder } from '../api.js';
 import { addRewatch, readProgress, setNote, setScore, setTags, take, watchedSet } from '../store.js';
 import { fmt } from '../player.js';
+import { motionAllowed } from '../motion.js';
 import { presenceAnime, setActivity } from '../presence.js';
 import {
   $, $$, big, card, episodeIndex, esc, fuzzyDate, icon, img, initSelect, listBtn, name, plain, pretty, score,
@@ -136,7 +137,7 @@ export async function anime(root, { params: [id], query, alive }) {
     else if (k === 'order') orderTab(panel, a, alive);
     else if (k === 'characters') characters(panel, cast);
     else related(panel, rel, recs);
-    if (scroll) $('.tabs', root).scrollIntoView({ behavior: 'smooth' });
+    if (scroll) $('.tabs', root).scrollIntoView({ behavior: motionAllowed() ? 'smooth' : 'auto' });
     if (play) $('.video-cover', panel)?.click();
   };
   $('.tabs', root).addEventListener('click', e => {

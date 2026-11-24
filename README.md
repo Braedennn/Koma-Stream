@@ -19,7 +19,7 @@ A dark, modern anime streaming app for Windows, Android phones and Android TVs �
 - Sub/dub episode counts on every poster, so you know before you click
 
 **The player**
-- Custom-built on hls.js — plays **Japanese sub and English dub** where available, with a one-click toggle that remembers your preference
+- Custom-built on hls.js — plays **Japanese audio with subtitles and English dubbed audio** where available
 - Auto-skip intro/outro when the source provides timestamps, autoplay next episode with a cancelable countdown, resume where you left off
 - Quality, speed, and subtitle menus; picture-in-picture; fullscreen; full keyboard shortcuts (space/K, J/L, arrows, F, M, N, C)
 - A next-episode transition lock, so autoplay can never skip or double-advance episodes
@@ -34,8 +34,8 @@ A dark, modern anime streaming app for Windows, Android phones and Android TVs �
 Download the package for your device from the [latest release](../../releases/latest):
 
 - **Windows:** `Koma-Setup.exe` — run it, and Koma opens with its servers already running.
-- **Android phone:** `Koma-1.7.17-phone.apk` — open it and allow installs from that source once.
-- **Android TV:** `Koma-1.7.17-tv.apk` — open it with a file manager and allow installs from that source once.
+- **Android phone:** `Koma-1.7.19-phone.apk` — open it and allow installs from that source once.
+- **Android TV:** `Koma-1.7.19-tv.apk` — open it with a file manager and allow installs from that source once.
 
 The Android apps update themselves from the same GitHub release. They download the correct APK in the background, verify it, and still wait for your confirmation before Android's installer opens.
 

@@ -968,3 +968,9 @@ html.tv .room-code { font-size: 44px; letter-spacing: .1em; }
 html.tv .kp-start { display: none !important; }
 html.tv .kplayer video { background: #000; }
 html.tv .kp-ic[data-act="full"] { display: none; }
+/* WebView paints its own enormous play glyph over an empty video, ignoring
+   the video's black background. Do not expose that element until it has a
+   real frame. The controls belong to the picture too: while it is loading,
+   the black player and its spinner are the whole arrival. */
+html.tv .kplayer:not(.kp-has-video) video { visibility: hidden; }
+html.tv .kplayer:not(.kp-has-video) :is(.kp-ambient, .kp-shade, .kp-top, .kp-bottom, .kp-skipbtn, .kp-nextcard) { visibility: hidden; }

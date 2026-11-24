@@ -58,6 +58,16 @@ try {
   mkdirSync(process.env.KOMA_DATA_DIR, { recursive: true });
 } catch { /* the key file ships with the app; a missing one fails loudly later */ }
 
+// The television flavor writes its application key into private app storage
+// before starting Node. The phone has no such file and keeps the personal-key
+// flow. A viewer-supplied key still takes precedence in the subtitle server.
+try {
+  const config = JSON.parse(readFileSync(join(root, '..', 'opensubtitles.json'), 'utf8'));
+  if (typeof config.apiKey === 'string' && config.apiKey.trim()) {
+    process.env.KOMA_OPENSUBTITLES_API_KEY = config.apiKey.trim();
+  }
+} catch { /* only the TV flavor supplies an application key */ }
+
 // Koma first: the WebView is waiting for it.
 await import('./koma/server.js');
 

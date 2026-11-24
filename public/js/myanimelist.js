@@ -11,7 +11,7 @@ const API = 'https://api.myanimelist.net/v2';
 
 let acct = load();
 let active = false;
-const remote = new Map(); // AniList mediaId -> { id: MAL id, mediaId, status, progress }
+const remote = new Map(); // AniList mediaId -> { id: MAL id, mediaId, status, progress, updatedAt }
 
 function load() {
   try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; }
@@ -145,13 +145,13 @@ async function pullList() {
     const mediaId = byMal.get(malId);
     if (!mediaId) continue;
     const listStatus = item?.list_status || {};
-    const status = STATUS[listStatus.status] || 'PLANNING';
-    const progress = Number(listStatus.num_watched_episodes) || 0;
-    const entry = { id: malId, mediaId, status, progress };
+    const status = listStatus.is_rewatching ? 'REPEATING' : STATUS[listStatus.status] || 'PLANNING';
+    const progress = Number(listStatus.num_episodes_watched) || 0;
+    const entry = { id: malId, mediaId, status, progress, updatedAt: listStatus.updated_at || '' };
     remote.set(mediaId, entry);
     if (status !== 'DROPPED') local.push(entry);
   }
-  mergeRemote(local);
+  mergeRemote(local, [...remote.values()]);
 }
 
 let syncing = null;

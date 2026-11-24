@@ -111,6 +111,26 @@
   </form>
 </dialog>
 
+<dialog class="modal" id="subtitle-search" aria-labelledby="subtitle-search-title">
+  <div class="modal-body">
+    <header class="settings-head">
+      <h2 id="subtitle-search-title">Find subtitles</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close subtitle search"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </header>
+    <p class="settings-note">Search OpenSubtitles, then choose the release that matches this episode. Nothing is downloaded until you press Add.</p>
+    <div class="subtitle-search-grid">
+      <label class="subtitle-query">Title<input type="search" data-os-query maxlength="160"></label>
+      <label>Language<input type="text" data-os-language value="en" maxlength="20" placeholder="en, es, fr"></label>
+      <label>Type<select data-os-type><option value="episode">Episode</option><option value="movie">Movie</option></select></label>
+      <label>Season<input type="number" data-os-season min="0" max="999" placeholder="Optional"></label>
+      <label>Episode<input type="number" data-os-episode min="0" max="9999"></label>
+      <label>Year<input type="number" data-os-year min="1900" max="2200" placeholder="Optional"></label>
+      <div class="subtitle-search-actions"><button class="btn btn-primary" type="button" data-os-search>Search</button></div>
+    </div>
+    <div class="subtitle-results" data-os-results aria-live="polite"><p class="subtitle-empty">Search when you are ready. Season is optional because anime numbering does not always match OpenSubtitles.</p></div>
+  </div>
+</dialog>
+
 <dialog class="modal settings-modal" id="settings" aria-labelledby="settings-title">
   <div class="modal-body settings-body">
     <header class="settings-head">
@@ -122,7 +142,7 @@
 
     <section class="settings-group">
       <h3>Preferred audio</h3>
-      <p class="settings-note">Koma opens every anime in the language you pick. When a title has no English dub, it falls back to the Japanese audio and the dub button is greyed out.</p>
+      <p class="settings-note">Choose Japanese audio with subtitles or English dubbed audio. If the English dub is unavailable for an episode, Koma falls back to subtitles for that episode.</p>
       <div class="seg-ctl" role="radiogroup" aria-label="Preferred audio">
         <button type="button" role="radio" data-set-audio="sub" aria-checked="true">
           <svg class="i" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11v5a3 3 0 0 0 5.2 2l3.8-3.8a3 3 0 0 0-4.2-4.2L10.5 11.3"/><path d="M17 13v-5a3 3 0 0 0-5.2-2L8 9.8"/></svg>
@@ -156,6 +176,31 @@
         <button type="button" role="radio" data-set-subs="id" aria-checked="false">Indonesian</button>
         <button type="button" role="radio" data-set-subs="th" aria-checked="false">Thai</button>
       </div>
+      <div class="cc-settings-grid">
+        <label>Text size<select data-cc-pref="ccSize"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="huge">Extra large</option></select></label>
+        <label>Font<select data-cc-pref="ccFont"><option value="sans">System sans</option><option value="arial">Arial</option><option value="verdana">Verdana</option><option value="tahoma">Tahoma</option><option value="trebuchet">Trebuchet MS</option><option value="serif">Georgia</option><option value="times">Times New Roman</option><option value="mono">Monospace</option><option value="courier">Courier New</option><option value="custom">Custom font…</option></select></label>
+        <label data-cc-custom-font-row hidden>Custom font name<input type="text" data-cc-custom-font maxlength="80" autocomplete="off" spellcheck="false" placeholder="Font installed on this device"></label>
+        <label>Text color<select data-cc-pref="ccColor"><option value="white">White</option><option value="yellow">Yellow</option><option value="cyan">Cyan</option><option value="green">Green</option><option value="black">Black</option></select></label>
+        <label>Background<select data-cc-pref="ccBackground"><option value="none">None</option><option value="dim">Dim</option><option value="solid">Solid black</option></select></label>
+        <label>Edge<select data-cc-pref="ccEdge"><option value="none">None</option><option value="shadow">Shadow</option><option value="outline">Outline</option></select></label>
+        <label>Weight<select data-cc-pref="ccWeight"><option value="500">Normal</option><option value="700">Bold</option></select></label>
+        <label>Position<select data-cc-pref="ccPosition"><option value="bottom">Raised above controls</option><option value="top">Top</option></select></label>
+      </div>
+      <div class="cc-preview-title">Preview</div>
+      <div class="cc-preview" data-cc-preview data-position="bottom" aria-label="Subtitle appearance preview"><span>Subtitles</span></div>
+    </section>
+
+    <section class="settings-group" data-os-settings>
+      <h3>OpenSubtitles</h3>
+      <p class="settings-note" data-os-note>Search for another subtitle release from the player’s gear menu. Your own API key is required; an account is optional and provides a higher download allowance than anonymous access. Create a key in your OpenSubtitles profile under API Consumers.</p>
+      <div class="os-credentials">
+        <label>API key<input type="password" data-os-api-key autocomplete="off" spellcheck="false" placeholder="Your OpenSubtitles API key"></label>
+        <div class="os-credentials-row">
+          <label>Username (optional)<input type="text" data-os-username autocomplete="username"></label>
+          <label>Password (optional)<input type="password" data-os-password autocomplete="current-password"></label>
+        </div>
+        <div class="os-account-line"><span data-os-status>Not connected</span><span><button class="btn btn-ghost btn-sm" type="button" data-os-login>Sign in</button> <button class="btn btn-ghost btn-sm" type="button" data-os-logout hidden>Sign out</button></span></div>
+      </div>
     </section>
 
     <section class="settings-group">
@@ -173,6 +218,11 @@
         <span>Autoplay the next episode</span>
         <span class="switch"><input type="checkbox" data-set-pref="autoNext"><span class="knob"></span></span>
       </label>
+      <label class="settings-row">
+        <span>Automatically continue to the next season or movie</span>
+        <span class="switch"><input type="checkbox" data-set-pref="autoSeason"><span class="knob"></span></span>
+      </label>
+      <p class="settings-note">At a season’s final episode, Koma offers the next related season or movie without leaving full screen. Turn this on to continue after the countdown instead of choosing Yes.</p>
       <label class="settings-row">
         <span>Skip the opening</span>
         <span class="switch"><input type="checkbox" data-set-pref="skipIntro"><span class="knob"></span></span>
@@ -208,7 +258,7 @@
         <span>Interface motion</span>
         <span class="switch"><input type="checkbox" data-set-motion><span class="knob"></span></span>
       </label>
-      <p class="settings-note">Page turns, cards arriving and controls easing turn off here - for a slow computer or television, or a preference for stillness. Everything works exactly the same without them.</p>
+      <p class="settings-note">Turn this off for a lighter, still interface on older phones, computers and televisions. It removes transitions, smooth scrolling, blur effects, spotlight autoplay and ambient video previews; playback controls keep working.</p>
     </section>
 
     <section class="settings-group" data-app-only hidden>

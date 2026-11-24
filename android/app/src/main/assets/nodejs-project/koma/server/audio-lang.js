@@ -13,13 +13,53 @@
 /** The audio language a track type needs. */
 export const AUDIO_LANG = { dub: 'en', sub: 'ja' };
 
+const ALIASES = {
+  eng: 'en', jpn: 'ja', hin: 'hi', fra: 'fr', fre: 'fr', spa: 'es', por: 'pt',
+  ger: 'de', deu: 'de', ita: 'it', rus: 'ru', ara: 'ar', chi: 'zh', zho: 'zh',
+  tur: 'tr', pol: 'pl', ind: 'id', tha: 'th', kor: 'ko',
+  tam: 'ta', tel: 'te', mal: 'ml', kan: 'kn', ben: 'bn',
+};
+
+/** A two-letter language code, including regional and ISO 639-2 variants. */
+function languageCode(value) {
+  const base = String(value || '').trim().toLowerCase().split(/[-_]/)[0];
+  const code = ALIASES[base] || base;
+  return /^[a-z]{2}$/.test(code) ? code : '';
+}
+
+/** Automatic and invalid/missing preferences retain the historic English default. */
+export const normalizeDubLang = value => !String(value || '').trim() || String(value).trim().toLowerCase() === 'auto'
+  ? 'en' : languageCode(value) || 'en';
+
+export function audioLanguageName(value) {
+  const code = normalizeDubLang(value);
+  try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code; }
+  catch { return code; }
+}
+
 /** The names the sites give the tracks when they do not say the language. */
 const NAMES = [
   { lang: 'en', words: ['english', 'ingles', 'inglés', 'anglais', 'englisch'] },
   { lang: 'ja', words: ['japanese', '日本語', 'japonais', 'japones', 'japonês', '日本'] },
   { lang: 'hi', words: ['hindi', 'हिन्दी', 'हिंदी'] },
+  { lang: 'fr', words: ['french', 'français', 'francais'] },
   { lang: 'es', words: ['spanish', 'español', 'espanol', 'espagnol'] },
   { lang: 'pt', words: ['portuguese', 'português', 'portugues'] },
+  { lang: 'de', words: ['german', 'deutsch'] },
+  { lang: 'it', words: ['italian', 'italiano'] },
+  { lang: 'ru', words: ['russian', 'русский'] },
+  { lang: 'ar', words: ['arabic', 'العربية'] },
+  { lang: 'zh', words: ['chinese', 'mandarin', '中文'] },
+  { lang: 'tr', words: ['turkish', 'türkçe', 'turkce'] },
+  { lang: 'pl', words: ['polish', 'polski'] },
+  { lang: 'id', words: ['indonesian', 'bahasa indonesia'] },
+  { lang: 'th', words: ['thai', 'ไทย'] },
+  { lang: 'ko', words: ['korean', '한국어'] },
+  { lang: 'ta', words: ['tamil', 'தமிழ்'] },
+  { lang: 'te', words: ['telugu', 'తెలుగు'] },
+  { lang: 'ml', words: ['malayalam', 'മലയാളം'] },
+  { lang: 'kn', words: ['kannada', 'ಕನ್ನಡ'] },
+  { lang: 'bn', words: ['bengali', 'bangla', 'বাংলা'] },
 ];
 
 /** The attributes of an #EXT-X-MEDIA line. */
@@ -53,8 +93,8 @@ export function audioTracks(master) {
 
 /** The language a track is in, as far as the playlist says. */
 export function trackLang(track) {
-  const code = String(track?.lang || '').toLowerCase().split(/[-_]/)[0];
-  if (code && code !== 'und') return code;
+  const code = languageCode(track?.lang);
+  if (code && String(track?.lang || '').toLowerCase() !== 'und') return code;
   const name = String(track?.name || '').toLowerCase();
   const row = NAMES.find(r => r.words.some(w => name.includes(w)));
   return row?.lang || '';
@@ -62,8 +102,9 @@ export function trackLang(track) {
 
 /** Is this track the language that was asked for? */
 export function isLang(track, lang) {
-  if (!track || !lang) return false;
-  return trackLang(track) === lang;
+  const want = languageCode(lang);
+  if (!track || !want) return false;
+  return trackLang(track) === want;
 }
 
 /** Set a flag on an #EXT-X-MEDIA line, adding it when it is not there. */
@@ -79,25 +120,40 @@ function flag(line, name, value) {
  * The track that was asked for becomes the default one, the others go, and
  * the variants that needed them go with them.
  */
-function narrow(text, pick) {
+function narrow(text, pick, strict) {
   const lines = text.split(/\r?\n/);
   const out = [];
   let skipUri = false;
+  let variants = 0;
   for (const line of lines) {
-    if (skipUri && line.trim() && !line.startsWith('#')) { skipUri = false; continue; }
-    skipUri = false;
+    const trimmed = line.trim();
+    if (skipUri) {
+      if (!trimmed || trimmed.startsWith('#')) {
+        // Comments and blank lines may sit between a variant tag and its URI.
+        // Keep looking for that URI rather than leaving an orphan behind.
+        out.push(line);
+        continue;
+      }
+      skipUri = false;
+      continue;
+    }
     if (/^#EXT-X-MEDIA:/i.test(line) && /TYPE=AUDIO/i.test(line)) {
       if (line === pick.line) out.push(flag(flag(line, 'DEFAULT', 'YES'), 'AUTOSELECT', 'YES'));
       continue; // the other languages are not in this stream any more
     }
     if (/^#EXT-X-STREAM-INF:/i.test(line)) {
       const group = attributes(line).AUDIO || '';
-      // Its group has no track left, so this variant cannot play.
-      if (group && pick.group && group !== pick.group) { skipUri = true; continue; }
+      // Strict playback cannot retain a muxed variant of unknown language.
+      // In every mode, a variant in another audio group cannot play the pick.
+      if ((strict ? group !== pick.group : group && pick.group && group !== pick.group)) {
+        skipUri = true;
+        continue;
+      }
+      variants++;
     }
     out.push(line);
   }
-  return out.join('\n');
+  return { text: out.join('\n'), variants };
 }
 
 /**
@@ -107,11 +163,20 @@ function narrow(text, pick) {
  * language that was asked for — this stream cannot serve it, and another one
  * has to be tried.
  */
-export function chooseAudio(master, lang) {
+export function chooseAudio(master, lang, { strict = false } = {}) {
   const text = String(master || '');
   const tracks = audioTracks(text);
-  if (!tracks.length) return { ok: true, master: text, lang: null, tracks };
-  const pick = tracks.find(t => isLang(t, lang));
+  if (!tracks.length) return { ok: !strict, master: text, lang: null, tracks, unverified: strict };
+  const variants = text.split(/\r?\n/).filter(line => /^#EXT-X-STREAM-INF:/i.test(line))
+    .map(line => ({ group: attributes(line).AUDIO || '' }));
+  const grouped = variants.filter(variant => variant.group);
+  // Strict playback accepts only a track attached to a video variant, and
+  // rejects unassociated muxed variants whose language cannot be established.
+  // Historic English/sub narrowing keeps its more permissive behavior.
+  const pick = tracks.find(track => isLang(track, lang)
+    && (!strict || grouped.some(variant => variant.group === track.group)));
   if (!pick) return { ok: false, master: text, lang: null, tracks };
-  return { ok: true, master: narrow(text, pick), lang, tracks, picked: pick };
+  const narrowed = narrow(text, pick, strict);
+  if (variants.length && !narrowed.variants) return { ok: false, master: text, lang: null, tracks };
+  return { ok: true, master: narrowed.text, lang, tracks, picked: pick };
 }

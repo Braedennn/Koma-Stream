@@ -12,8 +12,9 @@ import { list } from './views/list.js';
 import { stats } from './views/stats.js';
 import { notFound } from './views/notfound.js';
 import { initAudioBadges } from './streaming.js';
-import { abandon, applyMotion, arrive, initMotion, swapView } from './motion.js';
+import { abandon, applyMotion, arrive, initMotion, motionAllowed, swapView } from './motion.js';
 import { initSettings } from './settings.js';
+import { initSubtitles } from './subtitles.js';
 import { initDialogs } from './dialog.js';
 import { initNotifications } from './notify.js';
 import { initPresence, presenceForRoute, setActivity } from './presence.js';
@@ -272,6 +273,7 @@ initSettings({
   onTheme: theme => applyTheme(theme !== 'light'),
   onAudio: () => dispatchEvent(new CustomEvent('koma:audio')),
 });
+initSubtitles();
 
 // A dialog is its own little page: the page behind it stands still while it
 // is open.
@@ -350,7 +352,7 @@ document.addEventListener('click', e => {
   if (url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
   e.preventDefault();
   if (url.pathname === location.pathname && url.search === location.search && url.hash) {
-    document.getElementById(decodeURIComponent(url.hash.slice(1)))?.scrollIntoView({ behavior: 'smooth' });
+    document.getElementById(decodeURIComponent(url.hash.slice(1)))?.scrollIntoView({ behavior: motionAllowed() ? 'smooth' : 'auto' });
     return;
   }
   go(url.pathname + url.search + url.hash);

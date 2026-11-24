@@ -9,6 +9,7 @@
 // inside the same player, so the next card starts in a fraction of a second
 // instead of loading a second embed.
 import { ensureHls } from './player.js';
+import { motionAllowed } from './motion.js';
 import { streamWatch } from './streaming.js';
 import { icon } from './icons.js';
 
@@ -30,6 +31,7 @@ const tvMode = () => document.documentElement.classList.contains('tv');
  * make, and once they have made it, it sticks.
  */
 export const previewsOn = () => {
+  if (!motionAllowed()) return false;
   try {
     const v = localStorage.getItem(KEY);
     if (v === null) return !tvMode();
@@ -39,9 +41,9 @@ export const previewsOn = () => {
 
 export const setPreviewsOn = on => {
   try { localStorage.setItem(KEY, on ? '1' : '0'); } catch { /* private mode */ }
-  if (!on) stop();
+  if (!previewsOn()) stopPreviews();
   else initPreviews();
-  dispatchEvent(new CustomEvent('koma:previews', { detail: { on } }));
+  dispatchEvent(new CustomEvent('koma:previews', { detail: { on: previewsOn() } }));
 };
 
 // How long the pointer has to rest before anything starts. A sweep across a
@@ -422,7 +424,7 @@ function placeEp(row) {
 }
 
 async function startEpisode(row) {
-  if (!epCtx) return;
+  if (!epCtx || !previewsOn()) return;
   const n = Number(row.dataset.epPreview);
   if (!n) return;
   makeEpPanel();
@@ -435,7 +437,7 @@ async function startEpisode(row) {
   if (!followRaf) followRaf = requestAnimationFrame(follow);
   const token = ++epToken;
   try {
-    const r = await streamWatch({ anilistId: epCtx.anilistId, ep: n, type: epCtx.type(), source: epCtx.source() });
+    const r = await streamWatch({ anilistId: epCtx.anilistId, ep: n, type: epCtx.type(), dubLang: epCtx.dubLang?.() || 'en', source: epCtx.source() });
     if (token !== epToken || !epRow) return; // the pointer moved on
     const src = r.hlsProxyUrl || r.mp4ProxyUrl || r.streamUrl;
     if (!src) return;
@@ -483,6 +485,10 @@ function onOver(e) {
  * card, after the pointer has rested on it for a moment.
  */
 export function over(target) {
+  if (!previewsOn()) {
+    if (live || hover || epRow) stopPreviews();
+    return;
+  }
   const card = target.closest?.('[data-trailer]');
   const row = card ? null : target.closest?.('[data-ep-preview]');
   if (!card && !row) {
@@ -558,3 +564,10 @@ export function initPreviews() {
   // Another page is coming: nothing may keep playing over it.
   addEventListener('koma:route', () => stopPreviews());
 }
+
+// Stillness also stops work already in flight: destroy an HLS preview, cancel
+// pending hover timers and stop asking YouTube to render an invisible embed.
+addEventListener('koma:motion', event => {
+  if (event.detail?.on && previewsOn()) initPreviews();
+  else stopPreviews();
+});

@@ -6,6 +6,7 @@
 // carries anyone else's video.
 import { $, $$, esc, toast } from './ui.js';
 import { account } from './account.js';
+import { normalizeDubLang } from './streaming.js';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -196,7 +197,7 @@ export function waitForState(ms = 5000) {
   });
 }
 
-export const roomUrl = s => `/watch/${s.animeId}?ep=${s.ep}${s.type === 'dub' ? '&type=dub' : ''}`;
+export const roomUrl = s => `/watch/${s.animeId}?ep=${s.ep}${s.type === 'dub' ? `&type=dub&dubLang=${encodeURIComponent(normalizeDubLang(s.dubLang) || 'en')}` : ''}`;
 
 /* ---------- the watch page's side ---------- */
 

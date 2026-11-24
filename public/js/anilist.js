@@ -11,7 +11,7 @@ const GQL = 'https://graphql.anilist.co';
 
 let acct = load(); // { token, expires, user: { id, name, avatar } }
 let active = false;
-const remote = new Map(); // mediaId -> AniList entry { id, mediaId, status, progress }
+const remote = new Map(); // mediaId -> AniList entry { id, mediaId, status, progress, updatedAt }
 
 function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } }
 function persist() {
@@ -69,13 +69,14 @@ async function gql(query, variables = {}) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const maxWatched = id => { const s = watchedSet(id); return s.size ? Math.max(...s) : 0; };
-const LIST_QUERY = `query($u:Int){MediaListCollection(userId:$u,type:ANIME){lists{entries{id mediaId status progress}}}}`;
+const LIST_QUERY = `query($u:Int){MediaListCollection(userId:$u,type:ANIME){lists{entries{id mediaId status progress updatedAt}}}}`;
 
 async function pullList() {
   const d = await gql(LIST_QUERY, { u: acct.user.id });
   remote.clear();
   for (const l of d.MediaListCollection?.lists || []) for (const e of l.entries) remote.set(e.mediaId, e);
-  mergeRemote([...remote.values()].filter(e => e.status !== 'DROPPED'));
+  const entries = [...remote.values()];
+  mergeRemote(entries.filter(e => e.status !== 'DROPPED'), entries);
 }
 
 /** A full pass: pull the AniList list into Koma, then push what's ahead of AniList. */

@@ -136,6 +136,70 @@ export function showInContinue(id) {
   saveHidden(id);
 }
 
+/* ---------- account-driven Continue watching ----------
+ * Only Watching/CURRENT and Rewatching/REPEATING live here. This is deliberately
+ * separate from the manual shelves and from My list: a full account pull replaces
+ * this map, but never removes list entries, watched episodes or shelf choices. */
+const RKEY = 'koma.continue.remote.v1';
+const REMOTE_STATUSES = new Set(['CURRENT', 'REPEATING']);
+
+function loadRemoteContinue() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RKEY));
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return {};
+    return Object.fromEntries(Object.entries(saved).flatMap(([id, entry]) => {
+      const mediaId = Number(id);
+      if (!Number.isInteger(mediaId) || mediaId <= 0 || !REMOTE_STATUSES.has(entry?.status)) return [];
+      const rawProgress = Number(entry.progress);
+      const rawAt = Number(entry.at);
+      const progress = Number.isFinite(rawProgress) ? Math.max(0, Math.floor(rawProgress)) : 0;
+      const at = Number.isFinite(rawAt) ? Math.max(0, rawAt) : 0;
+      return [[mediaId, { status: entry.status, progress, at }]];
+    }));
+  } catch {
+    return {};
+  }
+}
+let remoteContinue = loadRemoteContinue();
+
+function remoteTimestamp(value) {
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.round(n < 1e12 ? n * 1000 : n); // AniList sends seconds; an already-normalized value is milliseconds.
+}
+
+function reconcileRemoteContinue(entries) {
+  const next = {};
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const mediaId = Number(entry?.mediaId);
+    if (!Number.isInteger(mediaId) || mediaId <= 0 || !REMOTE_STATUSES.has(entry?.status)) continue;
+    const progress = Number(entry.progress);
+    next[mediaId] = {
+      status: entry.status,
+      progress: Number.isFinite(progress) ? Math.max(0, Math.floor(progress)) : 0,
+      at: remoteTimestamp(entry.updatedAt),
+    };
+  }
+  if (JSON.stringify(next) === JSON.stringify(remoteContinue)) return false;
+  remoteContinue = next;
+  try { localStorage.setItem(RKEY, JSON.stringify(remoteContinue)); } catch { /* private mode or full: keep in memory */ }
+  dispatchEvent(new CustomEvent('koma:remote-continue'));
+  return true;
+}
+
+/** A copy of the active account's Watching/Rewatching entries, keyed by AniList id. */
+export const remoteContinueMap = () => Object.fromEntries(Object.entries(remoteContinue).map(([id, entry]) => [id, { ...entry }]));
+
+addEventListener('storage', e => {
+  if (e.key !== RKEY) return;
+  remoteContinue = loadRemoteContinue();
+  dispatchEvent(new CustomEvent('koma:remote-continue'));
+});
+
 export function toggleList(id) {
   state.list = inList(id) ? state.list.filter(x => x !== id) : [id, ...state.list];
   save(id);
@@ -159,8 +223,10 @@ export function setWatched(id, ep, on) {
   save(id);
 }
 
-/** Merge an AniList list in: every entry joins My list, and episodes up to its progress count as watched. Never removes anything. */
-export function mergeRemote(entries) {
+/** Merge a provider list in: entries join My list and episodes up to their progress count as watched.
+ *  My list/watch state is never removed. The separate continuation map is instead reconciled from
+ *  the complete pull, so a later Planning/Completed/Dropped status removes only its remote rail entry. */
+export function mergeRemote(entries, completeEntries = entries) {
   let changed = false;
   for (const { mediaId, progress } of entries) {
     if (!inList(mediaId)) { state.list.push(mediaId); changed = true; }
@@ -169,6 +235,7 @@ export function mergeRemote(entries) {
     if (seen.size) state.watched[mediaId] = [...seen].sort((a, b) => a - b);
   }
   if (changed) save(null, true);
+  reconcileRemoteContinue(completeEntries);
   return changed;
 }
 

@@ -1,6 +1,7 @@
 // Formatting helpers and shared UI components: cards, rows, hero, dropdowns, episode index.
 import { inLibrary, inList, shelfOf, SHELVES, watchedSet } from './store.js';
 import { icon } from './icons.js';
+import { motionAllowed } from './motion.js';
 
 export { icon };
 export const $ = (s, r = document) => r.querySelector(s);
@@ -172,8 +173,8 @@ export function initRails(root) {
       if (p) rail.style.setProperty('--poster-h', `${p.offsetHeight}px`);
       update();
     };
-    prev.addEventListener('click', () => track.scrollBy({ left: -track.clientWidth * 0.85, behavior: 'smooth' }));
-    next.addEventListener('click', () => track.scrollBy({ left: track.clientWidth * 0.85, behavior: 'smooth' }));
+    prev.addEventListener('click', () => track.scrollBy({ left: -track.clientWidth * 0.85, behavior: motionAllowed() ? 'smooth' : 'auto' }));
+    next.addEventListener('click', () => track.scrollBy({ left: track.clientWidth * 0.85, behavior: motionAllowed() ? 'smooth' : 'auto' }));
     track.addEventListener('scroll', update, { passive: true });
     new ResizeObserver(size).observe(track);
     size();
@@ -240,15 +241,17 @@ export function initHero(el) {
       if (i === cur) { void d.offsetWidth; d.classList.add('on'); }
     });
   };
-  // The progress bar's animation drives autoplay, so pausing the bar pauses the carousel.
-  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    el.addEventListener('animationend', e => { if (e.animationName === 'fill') show(cur + 1); });
-  } else {
-    el.classList.add('paused');
-  }
+  // The progress bar drives autoplay only while motion is allowed. Keep the
+  // listener installed so changing the setting does not require rebuilding the
+  // page, but ignore every fill event while the static interface is active.
+  const syncMotion = () => el.classList.toggle('paused', !motionAllowed());
+  syncMotion();
+  el.addEventListener('animationend', e => {
+    if (e.animationName === 'fill' && motionAllowed()) show(cur + 1);
+  });
   dots.forEach((d, i) => d.addEventListener('click', () => show(i)));
   $$('[data-step]', el).forEach(b => b.addEventListener('click', () => show(cur + Number(b.dataset.step))));
-  const pause = on => { if (!matchMedia('(prefers-reduced-motion: reduce)').matches) el.classList.toggle('paused', on); };
+  const pause = on => { if (motionAllowed()) el.classList.toggle('paused', on); };
   el.addEventListener('mouseenter', () => pause(true));
   el.addEventListener('mouseleave', () => pause(false));
   el.addEventListener('focusin', () => pause(true));

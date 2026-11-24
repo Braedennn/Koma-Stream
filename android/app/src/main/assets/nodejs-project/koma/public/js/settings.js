@@ -5,13 +5,13 @@
 // `koma.audio` for the preferred language, and the player's own preference
 // bag for everything playback-related.
 import { $, $$, esc, toast } from './ui.js';
-import { ccLangPref, getPref, pictureMode, setPref } from './player.js';
+import { captionStyle, ccLangPref, getPref, pictureMode, setPref } from './player.js';
 import { getAudioPref, setAudioPref } from './streaming.js';
 import { previewsOn, setPreviewsOn } from './preview.js';
-import { motionOn, setMotion } from './motion.js';
+import { motionAllowed, motionOn, setMotion } from './motion.js';
 
 /* The preferences the panel shows, and what they mean. */
-const PREFS = ['autoNext', 'skipIntro', 'skipOutro', 'autoplay'];
+const PREFS = ['autoNext', 'autoSeason', 'skipIntro', 'skipOutro', 'autoplay'];
 
 /* The tray switch belongs to the app shell: the page keeps the choice in its
    own storage and tells the shell what it is, at boot and on every change. */
@@ -54,8 +54,22 @@ function paint() {
   for (const i of $$('[data-set-pref]', dlg)) {
     i.checked = Boolean(getPref(i.dataset.setPref));
   }
+  for (const select of $$('[data-cc-pref]', dlg)) select.value = String(getPref(select.dataset.ccPref));
+  const customFontRow = $('[data-cc-custom-font-row]', dlg);
+  if (customFontRow) customFontRow.hidden = getPref('ccFont') !== 'custom';
+  const customFont = $('[data-cc-custom-font]', dlg);
+  if (customFont && document.activeElement !== customFont) customFont.value = String(getPref('ccCustomFont') || '');
+  const preview = $('[data-cc-preview]', dlg);
+  if (preview) {
+    preview.dataset.position = getPref('ccPosition') === 'top' ? 'top' : 'bottom';
+    for (const [key, value] of Object.entries(captionStyle())) preview.style.setProperty(key, value);
+  }
   const previews = $('[data-set-previews]', dlg);
-  if (previews) previews.checked = previewsOn();
+  if (previews) {
+    previews.checked = previewsOn();
+    previews.disabled = !motionAllowed();
+    previews.title = motionAllowed() ? '' : 'Turn Interface motion on to enable video previews';
+  }
   const motion = $('[data-set-motion]', dlg);
   if (motion) motion.checked = motionOn();
   const tray = $('[data-set-tray]', dlg);
@@ -167,6 +181,13 @@ export function initSettings({ onTheme, onAudio } = {}) {
     }
   });
 
+  dlg.addEventListener('input', e => {
+    if (!e.target.matches('[data-cc-custom-font]')) return;
+    setPref('ccCustomFont', e.target.value);
+    const preview = $('[data-cc-preview]', dlg);
+    if (preview) for (const [key, value] of Object.entries(captionStyle())) preview.style.setProperty(key, value);
+  });
+
   dlg.addEventListener('change', e => {
     if (e.target.matches('[data-set-tray]')) {
       setTray(e.target.checked);
@@ -180,7 +201,14 @@ export function initSettings({ onTheme, onAudio } = {}) {
     }
     if (e.target.matches('[data-set-motion]')) {
       setMotion(e.target.checked);
-      toast(e.target.checked ? 'The app moves again' : 'The app holds still now');
+      paint();
+      toast(e.target.checked ? 'Interface motion and previews are available again' : 'Lighter mode is on — motion, blur and ambient previews are off');
+      return;
+    }
+    const cc = e.target.closest('[data-cc-pref]');
+    if (cc) {
+      setPref(cc.dataset.ccPref, cc.value);
+      paint();
       return;
     }
     const i = e.target.closest('[data-set-pref]');
@@ -192,6 +220,7 @@ export function initSettings({ onTheme, onAudio } = {}) {
   // menu); keep the panel in step when it is next opened.
   addEventListener('koma:prefs', paint);
   addEventListener('koma:audio', paint);
+  addEventListener('koma:motion', paint);
 
   // the shell learns the tray preference now, not the first time the panel opens
   try { window.koma?.tray?.set(getTray()); } catch { /* a browser, not the app */ }
@@ -289,7 +318,7 @@ async function runDiagnose() {
 const BACKUP = { app: 'koma', kind: 'local-data', version: 1 };
 // Access and refresh tokens are account credentials, not ordinary local data.
 // They stay on the device and never enter a shareable backup file.
-const SENSITIVE_KEYS = new Set(['koma.anilist', 'koma.myanimelist']);
+const SENSITIVE_KEYS = new Set(['koma.anilist', 'koma.myanimelist', 'koma.opensubtitles']);
 const localKeys = () => {
   const out = [];
   try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k?.startsWith('koma.') && !SENSITIVE_KEYS.has(k)) out.push(k); } } catch { /* private mode */ }
