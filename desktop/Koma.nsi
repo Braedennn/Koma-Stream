@@ -5,7 +5,7 @@
 !include "LogicLib.nsh"
 
 !define APPNAME "Koma"
-!define VERSION "1.7.20"
+!define VERSION "1.7.21"
 !define PUB "TotallyNoire"
 
 Name "${APPNAME} ${VERSION}"
@@ -16,7 +16,7 @@ RequestExecutionLevel user
 SetCompressor /SOLID lzma
 BrandingText "${APPNAME}"
 
-VIProductVersion "1.7.20.0"
+VIProductVersion "1.7.21.0"
 VIAddVersionKey "LegalCopyright" "TotallyNoire"
 VIAddVersionKey "ProductName" "${APPNAME}"
 VIAddVersionKey "CompanyName" "${PUB}"

@@ -33,6 +33,13 @@
   <p id="status">Getting things ready…</p>
 </main>
 <script>
+  // Android TV shares this exact splash; desktop and phone keep the Koma name.
+  let television = false;
+  try { television = !!window.KomaAndroid?.isTv?.(); } catch { /* no Android bridge */ }
+  if (television) {
+    document.title = 'Koma TV';
+    document.querySelector('h1').textContent = 'Koma TV';
+  }
   window.setStatus = text => { document.getElementById('status').textContent = text; };
 </script>
 </body>

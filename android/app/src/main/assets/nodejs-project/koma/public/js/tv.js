@@ -898,7 +898,7 @@ function buildRail() {
   rail.innerHTML = `
     <div class="tv-rail-logo" aria-hidden="true">
       <span class="tv-rail-mark">${icon('play')}</span>
-      <span class="tv-rail-word">koma</span>
+      <span class="tv-rail-word">Koma TV</span>
     </div>
     <button class="tv-rail-item" type="button" data-tv-search>${icon('search')}<span>Search</span></button>
     ${RAIL_ITEMS.map(r => `<a class="tv-rail-item" href="${r.href}" data-tv-href="${r.href}">${icon(r.icon)}<span>${r.label}</span></a>`).join('')}
@@ -1015,6 +1015,9 @@ function buildSearch() {
 
   dlg.addEventListener('submit', e => {
     e.preventDefault();
+    // The keyboard's Enter/Search action always dismisses the keyboard, even
+    // when there is no query to submit yet.
+    try { window.KomaAndroid?.setTextEntry?.(false); } catch { /* no shell */ }
     const q = input.value.trim();
     if (!q) return;
     goToPage('/browse?search=' + encodeURIComponent(q));
@@ -1571,6 +1574,9 @@ export function initTv() {
     // second time would click the destination after the route has moved the
     // focus there. The browser's default Enter action is stopped as well.
     if (nativeTvRemote()) {
+      // The native shell passes an IME Enter/Search action through instead of
+      // treating it as a remote Center press. Let it submit the text field.
+      if (e.key === 'Enter' && textEntry()) return;
       e.preventDefault();
       return;
     }

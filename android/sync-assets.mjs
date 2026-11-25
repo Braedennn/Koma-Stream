@@ -20,6 +20,9 @@ const repo = join(here, '..');
 const assets = join(here, 'app', 'src', 'main', 'assets');
 const project = join(assets, 'nodejs-project');
 
+// The native shell shows the same splash as the desktop app while Node boots.
+cpSync(join(repo, 'desktop', 'splash.html'), join(assets, 'splash.html'));
+
 // The last packaged build already carries a pruned production tree for
 // AniVault; using it avoids a second npm install.
 const packagedAnivault = join(repo, 'desktop', 'dist', 'Koma-win32-x64', 'resources', 'anivault');

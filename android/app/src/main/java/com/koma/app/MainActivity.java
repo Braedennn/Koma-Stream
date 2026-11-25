@@ -59,6 +59,9 @@ public class MainActivity extends Activity {
   private UpdatePrompt updatePrompt;
   private View customView;
   private WebChromeClient.CustomViewCallback customViewCallback;
+  private volatile boolean textEntryRequested;
+  private boolean serversStarted;
+  private boolean startupSplash = true;
 
   /* The remote's keys go to the page, not to the WebView: the page knows
      what has the focus and what the pad should do with it. */
@@ -203,10 +206,13 @@ public class MainActivity extends Activity {
     // The page reads the app's version through this - the footer then says
     // "Koma 1.7.17 - Up to date" instead of presenting the app as a web page.
     webView.addJavascriptInterface(new KomaBridge(), "KomaAndroid");
+    // The desktop splash stays visible while the embedded servers boot instead
+    // of leaving the viewer looking at an empty black window. Its load callback
+    // starts Node, so even the runtime libraries load after the splash appears.
+    webView.loadUrl("file:///android_asset/splash.html");
     trace(this, "webview ready");
 
     acquireRoomMulticastLock();
-    startServers();
   }
 
   /** Hand the TV's application key to Node without exposing it to the page. */
@@ -231,6 +237,7 @@ public class MainActivity extends Activity {
    */
   private void startServers() {
     prepareOpenSubtitlesConfig();
+    splashStatus("Starting Koma…");
     try {
       trace(this, "starting node runtime");
       // The port the site ends up on belongs to this run: the old note is
@@ -256,6 +263,19 @@ public class MainActivity extends Activity {
     } catch (Exception ignored) { }
   }
 
+  /** Update the shared desktop/Android splash while the site is still booting. */
+  private void splashStatus(final String text) {
+    runOnUiThread(new Runnable() {
+      @Override
+      public void run() {
+        if (webView == null) return;
+        String script = "if (typeof window.setStatus === 'function') window.setStatus("
+            + JSONObject.quote(text) + ");";
+        webView.evaluateJavascript(script, null);
+      }
+    });
+  }
+
   /** Poll the site until the servers answer, then load it. */
   private void waitForSite() {
     new Thread(new Runnable() {
@@ -270,6 +290,7 @@ public class MainActivity extends Activity {
               public void run() {
                 if (webView == null) return;
                 trace(MainActivity.this, "loading the site in the webview");
+                splashStatus("Almost ready…");
                 // The television app opens the site in television mode, so the
                 // layout and the remote's navigation are the television's.
                 String callback = pendingAuthCallback;
@@ -286,6 +307,7 @@ public class MainActivity extends Activity {
           }
         }
         trace(MainActivity.this, "the site never answered after a minute");
+        splashStatus("Koma didn't start. Check the app's diagnostic log.");
       }
     }).start();
   }
@@ -451,6 +473,7 @@ public class MainActivity extends Activity {
      */
     @JavascriptInterface
     public void setTextEntry(final boolean on) {
+      textEntryRequested = on;
       runOnUiThread(new Runnable() {
         @Override
         public void run() {
@@ -569,6 +592,12 @@ public class MainActivity extends Activity {
   public boolean dispatchKeyEvent(KeyEvent event) {
     if (!BuildConfig.IS_TV) return super.dispatchKeyEvent(event);
     int code = event.getKeyCode();
+    // Gboard's Search/Enter action must reach the HTML form. It is not the
+    // remote's Center button, whose DPAD_CENTER event remains owned by the
+    // television navigator even while a text field is active.
+    if (textEntryRequested && (code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER)) {
+      return super.dispatchKeyEvent(event);
+    }
     String name = remoteKey(code, event);
     if (name == null) return super.dispatchKeyEvent(event);
 
@@ -687,6 +716,24 @@ public class MainActivity extends Activity {
   }
 
   private class AccountWebViewClient extends WebViewClient {
+    @Override
+    public void onPageFinished(WebView view, String url) {
+      super.onPageFinished(view, url);
+      if ("file:///android_asset/splash.html".equals(url)) {
+        if (!serversStarted) {
+          serversStarted = true;
+          // Let the finished splash reach the screen before loading libnode.
+          view.postDelayed(() -> startServers(), 50);
+        }
+        return;
+      }
+      if (startupSplash) {
+        startupSplash = false;
+        // The splash is boot feedback, not a page in the viewer's Back history.
+        view.clearHistory();
+      }
+    }
+
     @Override
     public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
       String url = request.getUrl() == null ? "" : request.getUrl().toString();
